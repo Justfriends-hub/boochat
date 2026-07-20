@@ -9,38 +9,203 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthSignupRouteImport } from './routes/auth.signup'
+import { Route as AuthLoginRouteImport } from './routes/auth.login'
+import { Route as AppStatusRouteImport } from './routes/_app.status'
+import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppGroupsRouteImport } from './routes/_app.groups'
+import { Route as AppChatsRouteImport } from './routes/_app.chats'
+import { Route as AppChannelsRouteImport } from './routes/_app.channels'
+import { Route as AppCallsRouteImport } from './routes/_app.calls'
+import { Route as AppAdminRouteImport } from './routes/_app.admin'
+import { Route as AppGroupsGroupIdRouteImport } from './routes/_app.groups.$groupId'
+import { Route as AppChatsChatIdRouteImport } from './routes/_app.chats.$chatId'
+import { Route as AppChannelsChannelIdRouteImport } from './routes/_app.channels.$channelId'
 
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthSignupRoute = AuthSignupRouteImport.update({
+  id: '/auth/signup',
+  path: '/auth/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthLoginRoute = AuthLoginRouteImport.update({
+  id: '/auth/login',
+  path: '/auth/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppStatusRoute = AppStatusRouteImport.update({
+  id: '/status',
+  path: '/status',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGroupsRoute = AppGroupsRouteImport.update({
+  id: '/groups',
+  path: '/groups',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppChatsRoute = AppChatsRouteImport.update({
+  id: '/chats',
+  path: '/chats',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppChannelsRoute = AppChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCallsRoute = AppCallsRouteImport.update({
+  id: '/calls',
+  path: '/calls',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGroupsGroupIdRoute = AppGroupsGroupIdRouteImport.update({
+  id: '/$groupId',
+  path: '/$groupId',
+  getParentRoute: () => AppGroupsRoute,
+} as any)
+const AppChatsChatIdRoute = AppChatsChatIdRouteImport.update({
+  id: '/$chatId',
+  path: '/$chatId',
+  getParentRoute: () => AppChatsRoute,
+} as any)
+const AppChannelsChannelIdRoute = AppChannelsChannelIdRouteImport.update({
+  id: '/$channelId',
+  path: '/$channelId',
+  getParentRoute: () => AppChannelsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AppAdminRoute
+  '/calls': typeof AppCallsRoute
+  '/channels': typeof AppChannelsRouteWithChildren
+  '/chats': typeof AppChatsRouteWithChildren
+  '/groups': typeof AppGroupsRouteWithChildren
+  '/settings': typeof AppSettingsRoute
+  '/status': typeof AppStatusRoute
+  '/auth/login': typeof AuthLoginRoute
+  '/auth/signup': typeof AuthSignupRoute
+  '/channels/$channelId': typeof AppChannelsChannelIdRoute
+  '/chats/$chatId': typeof AppChatsChatIdRoute
+  '/groups/$groupId': typeof AppGroupsGroupIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AppAdminRoute
+  '/calls': typeof AppCallsRoute
+  '/channels': typeof AppChannelsRouteWithChildren
+  '/chats': typeof AppChatsRouteWithChildren
+  '/groups': typeof AppGroupsRouteWithChildren
+  '/settings': typeof AppSettingsRoute
+  '/status': typeof AppStatusRoute
+  '/auth/login': typeof AuthLoginRoute
+  '/auth/signup': typeof AuthSignupRoute
+  '/channels/$channelId': typeof AppChannelsChannelIdRoute
+  '/chats/$chatId': typeof AppChatsChatIdRoute
+  '/groups/$groupId': typeof AppGroupsGroupIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/_app/admin': typeof AppAdminRoute
+  '/_app/calls': typeof AppCallsRoute
+  '/_app/channels': typeof AppChannelsRouteWithChildren
+  '/_app/chats': typeof AppChatsRouteWithChildren
+  '/_app/groups': typeof AppGroupsRouteWithChildren
+  '/_app/settings': typeof AppSettingsRoute
+  '/_app/status': typeof AppStatusRoute
+  '/auth/login': typeof AuthLoginRoute
+  '/auth/signup': typeof AuthSignupRoute
+  '/_app/channels/$channelId': typeof AppChannelsChannelIdRoute
+  '/_app/chats/$chatId': typeof AppChatsChatIdRoute
+  '/_app/groups/$groupId': typeof AppGroupsGroupIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/calls'
+    | '/channels'
+    | '/chats'
+    | '/groups'
+    | '/settings'
+    | '/status'
+    | '/auth/login'
+    | '/auth/signup'
+    | '/channels/$channelId'
+    | '/chats/$chatId'
+    | '/groups/$groupId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/admin'
+    | '/calls'
+    | '/channels'
+    | '/chats'
+    | '/groups'
+    | '/settings'
+    | '/status'
+    | '/auth/login'
+    | '/auth/signup'
+    | '/channels/$channelId'
+    | '/chats/$chatId'
+    | '/groups/$groupId'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/_app/admin'
+    | '/_app/calls'
+    | '/_app/channels'
+    | '/_app/chats'
+    | '/_app/groups'
+    | '/_app/settings'
+    | '/_app/status'
+    | '/auth/login'
+    | '/auth/signup'
+    | '/_app/channels/$channelId'
+    | '/_app/chats/$chatId'
+    | '/_app/groups/$groupId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  AuthLoginRoute: typeof AuthLoginRoute
+  AuthSignupRoute: typeof AuthSignupRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,11 +213,156 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/signup': {
+      id: '/auth/signup'
+      path: '/auth/signup'
+      fullPath: '/auth/signup'
+      preLoaderRoute: typeof AuthSignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/login': {
+      id: '/auth/login'
+      path: '/auth/login'
+      fullPath: '/auth/login'
+      preLoaderRoute: typeof AuthLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/status': {
+      id: '/_app/status'
+      path: '/status'
+      fullPath: '/status'
+      preLoaderRoute: typeof AppStatusRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/groups': {
+      id: '/_app/groups'
+      path: '/groups'
+      fullPath: '/groups'
+      preLoaderRoute: typeof AppGroupsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/chats': {
+      id: '/_app/chats'
+      path: '/chats'
+      fullPath: '/chats'
+      preLoaderRoute: typeof AppChatsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/channels': {
+      id: '/_app/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof AppChannelsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/calls': {
+      id: '/_app/calls'
+      path: '/calls'
+      fullPath: '/calls'
+      preLoaderRoute: typeof AppCallsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/admin': {
+      id: '/_app/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/groups/$groupId': {
+      id: '/_app/groups/$groupId'
+      path: '/$groupId'
+      fullPath: '/groups/$groupId'
+      preLoaderRoute: typeof AppGroupsGroupIdRouteImport
+      parentRoute: typeof AppGroupsRoute
+    }
+    '/_app/chats/$chatId': {
+      id: '/_app/chats/$chatId'
+      path: '/$chatId'
+      fullPath: '/chats/$chatId'
+      preLoaderRoute: typeof AppChatsChatIdRouteImport
+      parentRoute: typeof AppChatsRoute
+    }
+    '/_app/channels/$channelId': {
+      id: '/_app/channels/$channelId'
+      path: '/$channelId'
+      fullPath: '/channels/$channelId'
+      preLoaderRoute: typeof AppChannelsChannelIdRouteImport
+      parentRoute: typeof AppChannelsRoute
+    }
   }
 }
 
+interface AppChannelsRouteChildren {
+  AppChannelsChannelIdRoute: typeof AppChannelsChannelIdRoute
+}
+
+const AppChannelsRouteChildren: AppChannelsRouteChildren = {
+  AppChannelsChannelIdRoute: AppChannelsChannelIdRoute,
+}
+
+const AppChannelsRouteWithChildren = AppChannelsRoute._addFileChildren(
+  AppChannelsRouteChildren,
+)
+
+interface AppChatsRouteChildren {
+  AppChatsChatIdRoute: typeof AppChatsChatIdRoute
+}
+
+const AppChatsRouteChildren: AppChatsRouteChildren = {
+  AppChatsChatIdRoute: AppChatsChatIdRoute,
+}
+
+const AppChatsRouteWithChildren = AppChatsRoute._addFileChildren(
+  AppChatsRouteChildren,
+)
+
+interface AppGroupsRouteChildren {
+  AppGroupsGroupIdRoute: typeof AppGroupsGroupIdRoute
+}
+
+const AppGroupsRouteChildren: AppGroupsRouteChildren = {
+  AppGroupsGroupIdRoute: AppGroupsGroupIdRoute,
+}
+
+const AppGroupsRouteWithChildren = AppGroupsRoute._addFileChildren(
+  AppGroupsRouteChildren,
+)
+
+interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRoute
+  AppCallsRoute: typeof AppCallsRoute
+  AppChannelsRoute: typeof AppChannelsRouteWithChildren
+  AppChatsRoute: typeof AppChatsRouteWithChildren
+  AppGroupsRoute: typeof AppGroupsRouteWithChildren
+  AppSettingsRoute: typeof AppSettingsRoute
+  AppStatusRoute: typeof AppStatusRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRoute,
+  AppCallsRoute: AppCallsRoute,
+  AppChannelsRoute: AppChannelsRouteWithChildren,
+  AppChatsRoute: AppChatsRouteWithChildren,
+  AppGroupsRoute: AppGroupsRouteWithChildren,
+  AppSettingsRoute: AppSettingsRoute,
+  AppStatusRoute: AppStatusRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  AuthLoginRoute: AuthLoginRoute,
+  AuthSignupRoute: AuthSignupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
