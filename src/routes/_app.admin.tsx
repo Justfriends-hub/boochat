@@ -1,8 +1,15 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { zodValidator, fallback } from "@tanstack/zod-adapter";
+import { z } from "zod";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+} from "@/components/ui/select";
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from "@/components/ui/tabs";
@@ -24,17 +31,34 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { timeAgo } from "@/lib/format";
 import {
-  Users, MessageCircle, Radio, Image as ImageIcon, Heart, Eye, TrendingUp, ShieldAlert,
+  Users, MessageCircle, Radio, Image as ImageIcon, Heart, Eye, TrendingUp, ShieldAlert, X,
 } from "lucide-react";
 
+const searchSchema = z.object({
+  tab: fallback(z.string(), "users").default("users"),
+  au_user: fallback(z.string(), "").default(""),
+  au_action: fallback(z.string(), "").default(""),
+  au_from: fallback(z.string(), "").default(""),
+  au_to: fallback(z.string(), "").default(""),
+  bo_user: fallback(z.string(), "").default(""),
+  bo_kind: fallback(z.string(), "").default(""),
+  bo_from: fallback(z.string(), "").default(""),
+  bo_to: fallback(z.string(), "").default(""),
+});
+
 export const Route = createFileRoute("/_app/admin")({
+  validateSearch: zodValidator(searchSchema),
   component: AdminPage,
   head: () => ({ meta: [{ title: "Admin — Meshly" }] }),
 });
 
+function toDayStart(s: string) { return s ? new Date(s + "T00:00:00").getTime() : null; }
+function toDayEnd(s: string) { return s ? new Date(s + "T23:59:59.999").getTime() : null; }
+
 function AdminPage() {
   const me = useAuth();
-  const nav = useNavigate();
+  const nav = useNavigate({ from: "/admin" });
+  const search = Route.useSearch();
   const qc = useQueryClient();
   const [boostFor, setBoostFor] = useState<string | null>(null);
 
@@ -51,6 +75,57 @@ function AdminPage() {
   const { data: audits = [] } = useQuery({ queryKey: ["admin.audits"], queryFn: listAuditLogs });
   const { data: reports = [] } = useQuery({ queryKey: ["admin.reports"], queryFn: listReports });
 
+  const setSearch = (patch: Record<string, string>) => {
+    nav({
+      search: (prev) => {
+        const next: any = { ...prev, ...patch };
+        // Strip empty values so URL stays clean
+        Object.keys(next).forEach((k) => { if (next[k] === "") delete next[k]; });
+        return next;
+      },
+      replace: true,
+    });
+  };
+
+  const auditActions = useMemo(
+    () => Array.from(new Set(audits.map((a) => a.action))).sort(),
+    [audits],
+  );
+
+  const filteredAudits = useMemo(() => {
+    const q = search.au_user.toLowerCase().trim();
+    const from = toDayStart(search.au_from);
+    const to = toDayEnd(search.au_to);
+    return audits.filter((a) => {
+      if (search.au_action && a.action !== search.au_action) return false;
+      if (from && a.createdAt < from) return false;
+      if (to && a.createdAt > to) return false;
+      if (q) {
+        const u = users.find((x) => x.id === a.adminId);
+        const hay = `${u?.displayName || ""} ${u?.email || ""} ${a.adminId}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [audits, users, search.au_user, search.au_action, search.au_from, search.au_to]);
+
+  const filteredBoosts = useMemo(() => {
+    const q = search.bo_user.toLowerCase().trim();
+    const from = toDayStart(search.bo_from);
+    const to = toDayEnd(search.bo_to);
+    return boosts.filter((b) => {
+      if (search.bo_kind && b.kind !== search.bo_kind) return false;
+      if (from && b.createdAt < from) return false;
+      if (to && b.createdAt > to) return false;
+      if (q) {
+        const u = users.find((x) => x.id === b.adminId);
+        const hay = `${u?.displayName || ""} ${u?.email || ""} ${b.adminId}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [boosts, users, search.bo_user, search.bo_kind, search.bo_from, search.bo_to]);
+
   if (!me || me.role !== "admin") return null;
 
   const statCards = [
@@ -66,6 +141,11 @@ function AdminPage() {
     { label: "Reports", value: stats?.reports || 0, icon: ShieldAlert },
   ];
 
+  const auClear = () => setSearch({ au_user: "", au_action: "", au_from: "", au_to: "" });
+  const boClear = () => setSearch({ bo_user: "", bo_kind: "", bo_from: "", bo_to: "" });
+  const auActive = !!(search.au_user || search.au_action || search.au_from || search.au_to);
+  const boActive = !!(search.bo_user || search.bo_kind || search.bo_from || search.bo_to);
+
   return (
     <FeatureBoundary name="admin">
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -77,15 +157,19 @@ function AdminPage() {
             {statCards.map((s) => (
               <Card key={s.label} className="p-4">
                 <div className="flex items-center gap-2 text-muted-foreground text-xs">
-                  <s.icon className="h-4 w-4" /> {s.label}
+                  <s.icon className="h-4 w-4" aria-hidden="true" /> {s.label}
                 </div>
                 <p className="mt-1 text-2xl font-semibold">{s.value}</p>
               </Card>
             ))}
           </div>
 
-          <Tabs defaultValue="users" className="w-full">
-            <TabsList className="flex-wrap">
+          <Tabs
+            value={search.tab}
+            onValueChange={(v) => setSearch({ tab: v })}
+            className="w-full"
+          >
+            <TabsList className="flex-wrap h-auto">
               <TabsTrigger value="users">Users</TabsTrigger>
               <TabsTrigger value="chats">Chats & Groups</TabsTrigger>
               <TabsTrigger value="channels">Channels</TabsTrigger>
@@ -210,36 +294,123 @@ function AdminPage() {
             </TabsContent>
 
             <TabsContent value="audits">
-              <Table>
-                <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Action</TableHead><TableHead>Target</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {audits.map((a) => (
-                    <TableRow key={a.id}>
-                      <TableCell>{timeAgo(a.createdAt)}</TableCell>
-                      <TableCell>{users.find((u) => u.id === a.adminId)?.displayName || a.adminId}</TableCell>
-                      <TableCell>{a.action}</TableCell>
-                      <TableCell>{a.targetType}:{a.targetId.slice(0, 6)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="mb-3 grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="lg:col-span-2">
+                  <Label htmlFor="au_user" className="text-xs">User</Label>
+                  <Input
+                    id="au_user"
+                    placeholder="Name or email…"
+                    value={search.au_user}
+                    onChange={(e) => setSearch({ au_user: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="au_action" className="text-xs">Action</Label>
+                  <Select value={search.au_action || "__all"} onValueChange={(v) => setSearch({ au_action: v === "__all" ? "" : v })}>
+                    <SelectTrigger id="au_action"><SelectValue placeholder="All actions" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all">All actions</SelectItem>
+                      {auditActions.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="au_from" className="text-xs">From</Label>
+                  <Input id="au_from" type="date" value={search.au_from} onChange={(e) => setSearch({ au_from: e.target.value })} />
+                </div>
+                <div>
+                  <Label htmlFor="au_to" className="text-xs">To</Label>
+                  <Input id="au_to" type="date" value={search.au_to} onChange={(e) => setSearch({ au_to: e.target.value })} />
+                </div>
+                {auActive && (
+                  <div className="sm:col-span-2 lg:col-span-5 flex justify-between text-xs text-muted-foreground">
+                    <span>{filteredAudits.length} of {audits.length} entries</span>
+                    <Button size="sm" variant="ghost" onClick={auClear}>
+                      <X className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Clear filters
+                    </Button>
+                  </div>
+                )}
+              </div>
+              {filteredAudits.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  No results match your filters.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Action</TableHead><TableHead>Target</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {filteredAudits.map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell>{timeAgo(a.createdAt)}</TableCell>
+                        <TableCell>{users.find((u) => u.id === a.adminId)?.displayName || a.adminId}</TableCell>
+                        <TableCell>{a.action}</TableCell>
+                        <TableCell>{a.targetType}:{a.targetId.slice(0, 6)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </TabsContent>
 
             <TabsContent value="boosts">
-              <Table>
-                <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Post</TableHead><TableHead>Kind</TableHead><TableHead>Amount</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {boosts.map((b) => (
-                    <TableRow key={b.id}>
-                      <TableCell>{timeAgo(b.createdAt)}</TableCell>
-                      <TableCell>{users.find((u) => u.id === b.adminId)?.displayName || b.adminId}</TableCell>
-                      <TableCell>{b.postId.slice(0, 6)}</TableCell>
-                      <TableCell>{b.kind}</TableCell>
-                      <TableCell>+{b.amount}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="mb-3 grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="lg:col-span-2">
+                  <Label htmlFor="bo_user" className="text-xs">Admin</Label>
+                  <Input
+                    id="bo_user"
+                    placeholder="Name or email…"
+                    value={search.bo_user}
+                    onChange={(e) => setSearch({ bo_user: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="bo_kind" className="text-xs">Type</Label>
+                  <Select value={search.bo_kind || "__all"} onValueChange={(v) => setSearch({ bo_kind: v === "__all" ? "" : v })}>
+                    <SelectTrigger id="bo_kind"><SelectValue placeholder="All types" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all">All types</SelectItem>
+                      <SelectItem value="likes">Likes</SelectItem>
+                      <SelectItem value="views">Views</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="bo_from" className="text-xs">From</Label>
+                  <Input id="bo_from" type="date" value={search.bo_from} onChange={(e) => setSearch({ bo_from: e.target.value })} />
+                </div>
+                <div>
+                  <Label htmlFor="bo_to" className="text-xs">To</Label>
+                  <Input id="bo_to" type="date" value={search.bo_to} onChange={(e) => setSearch({ bo_to: e.target.value })} />
+                </div>
+                {boActive && (
+                  <div className="sm:col-span-2 lg:col-span-5 flex justify-between text-xs text-muted-foreground">
+                    <span>{filteredBoosts.length} of {boosts.length} boosts</span>
+                    <Button size="sm" variant="ghost" onClick={boClear}>
+                      <X className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Clear filters
+                    </Button>
+                  </div>
+                )}
+              </div>
+              {filteredBoosts.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  No results match your filters.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Post</TableHead><TableHead>Kind</TableHead><TableHead>Amount</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {filteredBoosts.map((b) => (
+                      <TableRow key={b.id}>
+                        <TableCell>{timeAgo(b.createdAt)}</TableCell>
+                        <TableCell>{users.find((u) => u.id === b.adminId)?.displayName || b.adminId}</TableCell>
+                        <TableCell>{b.postId.slice(0, 6)}</TableCell>
+                        <TableCell>{b.kind}</TableCell>
+                        <TableCell>+{b.amount}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </TabsContent>
           </Tabs>
         </div>
