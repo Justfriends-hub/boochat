@@ -77,12 +77,11 @@ function AdminPage() {
 
   const setSearch = (patch: Record<string, string>) => {
     nav({
-      search: (prev) => {
-        const next: any = { ...prev, ...patch };
-        // Strip empty values so URL stays clean
-        Object.keys(next).forEach((k) => { if (next[k] === "") delete next[k]; });
+      search: ((prev: Record<string, string>) => {
+        const next: Record<string, string> = { ...prev, ...patch };
+        Object.keys(next).forEach((k) => { if (!next[k]) delete next[k]; });
         return next;
-      },
+      }) as any,
       replace: true,
     });
   };
