@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -22,20 +22,33 @@ export const Route = createFileRoute("/_app/groups")({
 });
 
 function GroupsPage() {
-  const me = useAuth()!;
+  const me = useAuth();
   const qc = useQueryClient();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
 
-  const { data: chats = [] } = useQuery({ queryKey: ["chats", me.id], queryFn: () => listChats(me.id) });
-  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const { data: chats = [] } = useQuery({
+    queryKey: ["chats", me?.id ?? ""],
+    queryFn: () => listChats(me!.id),
+    enabled: !!me,
+  });
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers, enabled: !!me });
 
   useEffect(() => {
+    if (!me) return;
     const u = subscribeToChats(() => qc.invalidateQueries({ queryKey: ["chats", me.id] }));
     return u;
-  }, [me.id, qc]);
+  }, [me, qc]);
+
+  if (!me) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   const groups = chats.filter((c) => c.type === "group");
 
@@ -81,6 +94,8 @@ function GroupsPage() {
             </ul>
           )}
         </div>
+
+        <Outlet />
 
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent>

@@ -21,7 +21,7 @@ export const Route = createFileRoute("/_app/status")({
 });
 
 function StatusPage() {
-  const me = useAuth()!;
+  const me = useAuth();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [viewerIdx, setViewerIdx] = useState<number | null>(null);
@@ -31,13 +31,23 @@ function StatusPage() {
     queryKey: ["statuses"],
     queryFn: listActiveStatuses,
     refetchInterval: 60_000, // recompute expiry
+    enabled: !!me,
   });
-  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers, enabled: !!me });
 
   useEffect(() => {
+    if (!me) return;
     const unsub = subscribeToStatuses(() => qc.invalidateQueries({ queryKey: ["statuses"] }));
     return unsub;
-  }, [qc]);
+  }, [me, qc]);
+
+  if (!me) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   const my = useMemo(() => statuses.filter((s) => s.userId === me.id), [statuses, me.id]);
   const others = useMemo(() => statuses.filter((s) => s.userId !== me.id), [statuses, me.id]);

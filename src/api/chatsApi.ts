@@ -1,68 +1,247 @@
-import { getState, setState, uid, type Chat } from "@/lib/mockStore";
-import { publish, subscribe } from "@/lib/eventBus";
+import { supabase } from "@/lib/supabaseClient";
+import { publish } from "@/lib/eventBus";
+import type { Chat } from "@/lib/mockStore";
+
+function mapChat(chat: any, members: string[], group: any | null): Chat {
+  const base: Chat = {
+    id: chat.id,
+    type: chat.type,
+    memberIds: members,
+    createdAt: new Date(chat.created_at).getTime(),
+    avatar: chat.avatar_url ?? undefined,
+    name: chat.name ?? undefined,
+    ownerId: group?.owner_id ?? undefined,
+    admins: group?.admins ?? undefined,
+    permissions: group ? {
+      onlyAdminsPost: group.only_admins_post,
+      onlyAdminsAdd: group.only_admins_add,
+    } : undefined,
+  };
+  return base;
+}
+
+async function fetchChatMembers(chatIds: string[]) {
+  const { data, error } = await supabase
+    .from("chat_members")
+    .select("chat_id,user_id")
+    .in("chat_id", chatIds);
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
 
 export async function listChats(userId: string): Promise<Chat[]> {
-  return getState().chats
-    .filter((c) => c.memberIds.includes(userId))
-    .sort((a, b) => {
-      const am = a.lastMessageId ? getState().messages.find((m) => m.id === a.lastMessageId)?.createdAt ?? a.createdAt : a.createdAt;
-      const bm = b.lastMessageId ? getState().messages.find((m) => m.id === b.lastMessageId)?.createdAt ?? b.createdAt : b.createdAt;
-      return bm - am;
-    });
+  const { data: membershipRows, error: membershipError } = await supabase
+    .from("chat_members")
+    .select("chat_id")
+    .eq("user_id", userId);
+  if (membershipError) throw new Error(membershipError.message);
+
+  const chatIds = (membershipRows ?? []).map((row) => row.chat_id);
+  if (!chatIds.length) return [];
+
+  const { data: chats, error: chatError } = await supabase
+    .from("chats")
+    .select("*")
+    .in("id", chatIds)
+    .order("updated_at", { ascending: false });
+  if (chatError) throw new Error(chatError.message);
+
+  const memberRows = await fetchChatMembers(chatIds);
+  const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
+  if (groupsData.error) throw new Error(groupsData.error.message);
+  const groups = groupsData.data ?? [];
+
+  return (chats ?? []).map((chatRow) => {
+    const members = memberRows
+      .filter((row) => row.chat_id === chatRow.id)
+      .map((row) => row.user_id);
+    const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
+    return mapChat(chatRow, members, group);
+  });
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
-  return getState().chats.find((c) => c.id === id);
+  const { data: chatRow, error: chatError } = await supabase
+    .from("chats")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (chatError || !chatRow) return undefined;
+
+  const { data: memberRows, error: memberError } = await supabase
+    .from("chat_members")
+    .select("user_id")
+    .eq("chat_id", id);
+  if (memberError) throw new Error(memberError.message);
+
+  const members = (memberRows ?? []).map((row) => row.user_id);
+
+  let group = null;
+  if (chatRow.type === "group") {
+    const { data: groupRow, error: groupError } = await supabase
+      .from("groups")
+      .select("*")
+      .eq("chat_id", id)
+      .single();
+    if (groupError && groupError.code !== "PGRST116") throw new Error(groupError.message);
+    group = groupRow ?? null;
+  }
+
+  return mapChat(chatRow, members, group);
 }
 
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {
-  const existing = getState().chats.find(
-    (c) => c.type === "dm" && c.memberIds.includes(userA) && c.memberIds.includes(userB),
-  );
-  if (existing) return existing;
-  const chat: Chat = {
-    id: uid(), type: "dm", memberIds: [userA, userB], createdAt: Date.now(),
-  };
-  setState((s) => { s.chats.push(chat); });
+  const { data: userAChats, error: userAError } = await supabase
+    .from("chat_members")
+    .select("chat_id")
+    .eq("user_id", userA);
+  if (userAError) throw new Error(userAError.message);
+
+  const chatIds = (userAChats ?? []).map((row) => row.chat_id);
+  if (chatIds.length) {
+    const { data: sharedChats, error: sharedError } = await supabase
+      .from("chat_members")
+      .select("chat_id")
+      .in("chat_id", chatIds)
+      .eq("user_id", userB);
+    if (sharedError) throw new Error(sharedError.message);
+
+    const sharedIds = (sharedChats ?? []).map((row) => row.chat_id);
+    if (sharedIds.length) {
+      const { data: chats, error: chatError } = await supabase
+        .from("chats")
+        .select("*")
+        .in("id", sharedIds)
+        .eq("type", "dm")
+        .limit(1);
+      if (chatError) throw new Error(chatError.message);
+      if (chats?.length) {
+        const chat = chats[0];
+        const { data: memberRows, error: memberError } = await supabase
+          .from("chat_members")
+          .select("user_id")
+          .eq("chat_id", chat.id);
+        if (memberError) throw new Error(memberError.message);
+        return mapChat(chat, (memberRows ?? []).map((row) => row.user_id), null);
+      }
+    }
+  }
+
+  const { data: newChat, error: createChatError } = await supabase
+    .from("chats")
+    .insert([{ type: "dm" }])
+    .select()
+    .single();
+  if (createChatError || !newChat) throw new Error(createChatError?.message || "Unable to create chat.");
+
+  const { error: membershipError } = await supabase.from("chat_members").insert([
+    { chat_id: newChat.id, user_id: userA },
+    { chat_id: newChat.id, user_id: userB },
+  ]);
+  if (membershipError) throw new Error(membershipError.message);
+
   publish("chats:changed");
-  return chat;
+  return mapChat(newChat, [userA, userB], null);
 }
 
 export async function createGroup(input: {
-  name: string; memberIds: string[]; ownerId: string; avatar?: string;
+  name: string;
+  memberIds: string[];
+  ownerId: string;
+  avatar?: string;
 }): Promise<Chat> {
-  const chat: Chat = {
-    id: uid(), type: "group",
-    name: input.name,
-    avatar: input.avatar || `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(input.name)}`,
-    memberIds: Array.from(new Set([input.ownerId, ...input.memberIds])),
-    ownerId: input.ownerId,
-    admins: [input.ownerId],
-    permissions: { onlyAdminsPost: false, onlyAdminsAdd: false },
-    createdAt: Date.now(),
-  };
-  setState((s) => { s.chats.push(chat); });
+  const { data: newChat, error: createChatError } = await supabase
+    .from("chats")
+    .insert([
+      {
+        type: "group",
+        name: input.name,
+        avatar_url: input.avatar,
+      },
+    ])
+    .select()
+    .single();
+  if (createChatError || !newChat) throw new Error(createChatError?.message || "Unable to create group chat.");
+
+  const { data: groupRow, error: createGroupError } = await supabase
+    .from("groups")
+    .insert([
+      {
+        chat_id: newChat.id,
+        name: input.name,
+        avatar_url: input.avatar,
+        owner_id: input.ownerId,
+      },
+    ])
+    .select()
+    .single();
+  if (createGroupError || !groupRow) throw new Error(createGroupError?.message || "Unable to create group metadata.");
+
+  const members = Array.from(new Set([input.ownerId, ...input.memberIds]));
+  const memberRows = members.map((userId) => ({ chat_id: newChat.id, user_id: userId }));
+  const { error: membershipError } = await supabase.from("chat_members").insert(memberRows);
+  if (membershipError) throw new Error(membershipError.message);
+
   publish("chats:changed");
-  return chat;
+  return mapChat(newChat, members, groupRow);
 }
 
 export async function updateChat(id: string, patch: Partial<Chat>) {
-  setState((s) => {
-    const c = s.chats.find((x) => x.id === id);
-    if (c) Object.assign(c, patch);
-  });
+  if (patch.name !== undefined || patch.avatar !== undefined) {
+    const update: Record<string, any> = {};
+    if (patch.name !== undefined) update.name = patch.name;
+    if (patch.avatar !== undefined) update.avatar_url = patch.avatar;
+    const { error } = await supabase.from("chats").update(update).eq("id", id);
+    if (error) throw new Error(error.message);
+  }
+
+  if (patch.ownerId !== undefined || patch.permissions !== undefined) {
+    const groupUpdate: Record<string, any> = {};
+    if (patch.ownerId !== undefined) groupUpdate.owner_id = patch.ownerId;
+    if (patch.permissions !== undefined) {
+      groupUpdate.only_admins_post = patch.permissions.onlyAdminsPost;
+      groupUpdate.only_admins_add = patch.permissions.onlyAdminsAdd;
+    }
+    const { error } = await supabase.from("groups").update(groupUpdate).eq("chat_id", id);
+    if (error) throw new Error(error.message);
+  }
+
   publish("chats:changed");
   publish(`chat:${id}`);
 }
 
 export async function leaveGroup(chatId: string, userId: string) {
-  setState((s) => {
-    const c = s.chats.find((x) => x.id === chatId);
-    if (c) c.memberIds = c.memberIds.filter((x) => x !== userId);
-  });
+  const { error: memberError } = await supabase
+    .from("chat_members")
+    .delete()
+    .eq("chat_id", chatId)
+    .eq("user_id", userId);
+  if (memberError) throw new Error(memberError.message);
+
+  const { data: groupRow, error: groupError } = await supabase
+    .from("groups")
+    .select("id")
+    .eq("chat_id", chatId)
+    .single();
+  if (!groupError && groupRow) {
+    await supabase
+      .from("group_members")
+      .delete()
+      .eq("group_id", groupRow.id)
+      .eq("user_id", userId);
+  }
+
   publish("chats:changed");
 }
 
 export function subscribeToChats(cb: () => void) {
-  return subscribe("chats:changed", cb);
+  const channel = supabase.channel("chats");
+  channel.on("postgres_changes", { event: "*", schema: "public", table: "chats" }, () => cb());
+  channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, () => cb());
+  channel.subscribe();
+
+  return () => {
+    channel.unsubscribe();
+  };
 }

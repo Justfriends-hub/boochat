@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { signIn } from "@/api/authApi";
 import { useAuth } from "@/hooks/useAuth";
-import { initStore } from "@/lib/mockStore";
 
 export const Route = createFileRoute("/auth/login")({
   component: LoginPage,
@@ -21,7 +20,6 @@ function LoginPage() {
   const [password, setPassword] = useState("admin1234");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { initStore(); }, []);
   useEffect(() => { if (me) nav({ to: "/chats" }); }, [me, nav]);
 
   const submit = async (e: React.FormEvent) => {

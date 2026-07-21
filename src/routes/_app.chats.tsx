@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
 import { listChats, getOrCreateDM, subscribeToChats } from "@/api/chatsApi";
 import { listUsers } from "@/api/usersApi";
-import { getState } from "@/lib/mockStore";
 import { useAuth } from "@/hooks/useAuth";
 import { timeAgo } from "@/lib/format";
 import {
@@ -22,33 +21,58 @@ export const Route = createFileRoute("/_app/chats")({
 });
 
 function ChatsPage() {
-  const me = useAuth()!;
+  const me = useAuth();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   const qc = useQueryClient();
   const nav = useNavigate();
   const [search, setSearch] = useState("");
   const [newChatOpen, setNewChatOpen] = useState(false);
 
+  const isChatDetailRoute = pathname !== "/chats" && pathname.startsWith("/chats/");
+
   const { data: chats = [], isLoading } = useQuery({
-    queryKey: ["chats", me.id],
-    queryFn: () => listChats(me.id),
+    queryKey: ["chats", me?.id ?? ""],
+    queryFn: () => (me ? listChats(me.id) : Promise.resolve([])),
+    enabled: !!me,
   });
-  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers, enabled: !!me });
 
   useEffect(() => {
+    if (!me) return;
     const unsub = subscribeToChats(() => qc.invalidateQueries({ queryKey: ["chats", me.id] }));
     return unsub;
-  }, [me.id, qc]);
+  }, [me, qc]);
+
+  if (!me) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (isChatDetailRoute) {
+    return (
+      <FeatureBoundary name="chats">
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Outlet />
+        </div>
+      </FeatureBoundary>
+    );
+  }
 
   const rows = useMemo(() => {
-    return chats.map((c) => {
-      const other = c.type === "dm" ? users.find((u) => u.id === c.memberIds.find((x) => x !== me.id)) : null;
-      const name = c.type === "group" ? c.name : other?.displayName || "Chat";
-      const avatar = c.type === "group" ? c.avatar : other?.avatar;
-      const online = other?.online;
-      const last = c.lastMessageId ? getState().messages.find((m) => m.id === c.lastMessageId) : null;
-      const unread = getState().messages.filter((m) => m.chatId === c.id && m.senderId !== me.id && m.status !== "read").length;
-      return { chat: c, name, avatar, online, last, unread };
-    }).filter((r) => !search.trim() || r.name?.toLowerCase().includes(search.toLowerCase()));
+    return chats
+      .map((c) => {
+        const other = c.type === "dm" ? users.find((u) => u.id === c.memberIds.find((x) => x !== me.id)) : null;
+        const name = c.type === "group" ? c.name : other?.displayName || "Chat";
+        const avatar = c.type === "group" ? c.avatar : other?.avatar;
+        const online = other?.online;
+        const last = undefined;
+        const unread = 0;
+        return { chat: c, name, avatar, online, last, unread };
+      })
+      .filter((r) => !search.trim() || r.name?.toLowerCase().includes(search.toLowerCase()));
   }, [chats, users, me.id, search]);
 
   return (
@@ -118,6 +142,8 @@ function ChatsPage() {
             </ul>
           )}
         </div>
+
+        <Outlet />
 
         <Dialog open={newChatOpen} onOpenChange={setNewChatOpen}>
           <DialogContent>

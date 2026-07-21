@@ -1,7 +1,7 @@
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppNav } from "@/components/AppNav";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, useAuthReady } from "@/hooks/useAuth";
 import { initStore } from "@/lib/mockStore";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
 
@@ -11,18 +11,16 @@ export const Route = createFileRoute("/_app")({
 
 function AppLayout() {
   const me = useAuth();
+  const ready = useAuthReady();
   const nav = useNavigate();
+
   useEffect(() => { initStore(); }, []);
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Wait one tick for hydration; if still no user, redirect.
-    const t = setTimeout(() => {
-      if (!me) nav({ to: "/auth/login" });
-    }, 30);
-    return () => clearTimeout(t);
-  }, [me, nav]);
+    if (!ready || typeof window === "undefined") return;
+    if (!me) nav({ to: "/auth/login" });
+  }, [me, ready, nav]);
 
-  if (!me) {
+  if (!ready || !me) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center bg-background">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />

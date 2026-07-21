@@ -15,8 +15,16 @@ export const Route = createFileRoute("/_app/settings")({
 });
 
 function SettingsPage() {
-  const me = useAuth()!;
+  const me = useAuth();
   const nav = useNavigate();
+
+  if (!me) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">

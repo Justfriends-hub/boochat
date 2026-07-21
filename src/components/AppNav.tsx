@@ -14,7 +14,7 @@ const items = [
 
 export function AppNav() {
   const user = useAuth();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const nav = [...items];
   if (user?.role === "admin") nav.push({ to: "/admin", label: "Admin", icon: ShieldCheck } as any);
 
@@ -30,7 +30,7 @@ export function AppNav() {
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4" aria-label="Sections">
           {nav.map((it) => {
-            const active = pathname === it.to || pathname.startsWith(it.to + "/");
+            const active = pathname === it.to || (typeof pathname === "string" && pathname.startsWith(it.to + "/"));
             return (
               <Link
                 key={it.to}
@@ -59,7 +59,7 @@ export function AppNav() {
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {nav.map((it) => {
-          const active = pathname === it.to || pathname.startsWith(it.to + "/");
+          const active = pathname === it.to || (typeof pathname === "string" && pathname.startsWith(it.to + "/"));
           return (
             <Link
               key={it.to}

@@ -2,7 +2,8 @@ import { getState, setState, uid, type Channel, type ChannelPost, type Comment }
 import { publish, subscribe } from "@/lib/eventBus";
 
 export async function listChannels(): Promise<Channel[]> {
-  return [...getState().channels].sort((a, b) => b.createdAt - a.createdAt);
+  const uniqueChannels = Array.from(new Map(getState().channels.map((c) => [c.id, c])).values());
+  return uniqueChannels.sort((a, b) => b.createdAt - a.createdAt);
 }
 export async function getChannel(id: string) {
   return getState().channels.find((c) => c.id === id);

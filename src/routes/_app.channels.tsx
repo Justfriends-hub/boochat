@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Radio } from "lucide-react";
@@ -46,6 +46,7 @@ function ChannelsPage() {
             </ul>
           )}
         </div>
+        <Outlet />
       </div>
     </FeatureBoundary>
   );

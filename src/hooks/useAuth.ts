@@ -1,22 +1,27 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { getCurrentUser } from "@/api/authApi";
-import { subscribe } from "@/lib/eventBus";
+import { useEffect, useSyncExternalStore } from "react";
+import { getAuthReady, getCurrentUser, initializeAuth, subscribeAuth } from "@/api/authApi";
 import type { User } from "@/lib/mockStore";
 
-function subscribeAuth(cb: () => void) {
-  const u1 = subscribe("auth:changed", cb);
-  const u2 = subscribe("users:changed", cb);
-  const u3 = subscribe("store:seeded", cb);
-  return () => { u1(); u2(); u3(); };
-}
-
 export function useAuth(): User | null {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-  const user = useSyncExternalStore(
+  useEffect(() => {
+    initializeAuth();
+  }, []);
+
+  return useSyncExternalStore(
     subscribeAuth,
     () => getCurrentUser(),
     () => null,
   );
-  return hydrated ? user : null;
+}
+
+export function useAuthReady(): boolean {
+  useEffect(() => {
+    initializeAuth();
+  }, []);
+
+  return useSyncExternalStore(
+    subscribeAuth,
+    () => getAuthReady(),
+    () => false,
+  );
 }
