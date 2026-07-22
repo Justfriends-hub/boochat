@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
@@ -15,12 +16,19 @@ import {
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from "@/components/ui/table";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { UserAvatar } from "@/components/UserAvatar";
 import { BoostDialog } from "@/components/BoostDialog";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
 import {
   overviewStats, toggleBan, deletePostAsAdmin,
   listBoosts, listAuditLogs, listReports, seedAdminExtras,
+  editUserProfile, resetUserPassword, forceLogoutUser,
+  editGroup, deleteGroup, removeGroupMember, transferGroupOwnership,
+  editChannel, deleteChannel, pinPost, unpinPost, updateReportStatus,
+  exportAuditLog,
 } from "@/api/adminApi";
 import { listUsers } from "@/api/usersApi";
 import { listPosts, likeCount, viewCount } from "@/api/channelsApi";
@@ -30,7 +38,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { timeAgo } from "@/lib/format";
 import {
-  Users, MessageCircle, Radio, Image as ImageIcon, Heart, Eye, TrendingUp, ShieldAlert, X,
+  Users, MessageCircle, Radio, Image as ImageIcon, Heart, Eye,
+  TrendingUp, ShieldAlert, X, Pin, PinOff, Trash2, Edit2,
+  LogOut, RefreshCw, Shield, UserMinus, Download,
 } from "lucide-react";
 
 const searchSchema = z.object({
@@ -50,15 +60,8 @@ export const Route = createFileRoute("/_app/admin")({
     const result = searchSchema.safeParse(search);
     if (result.success) return result.data;
     return {
-      tab: "users",
-      au_user: "",
-      au_action: "",
-      au_from: "",
-      au_to: "",
-      bo_user: "",
-      bo_kind: "",
-      bo_from: "",
-      bo_to: "",
+      tab: "users", au_user: "", au_action: "", au_from: "", au_to: "",
+      bo_user: "", bo_kind: "", bo_from: "", bo_to: "",
     };
   },
   component: AdminPage,
@@ -74,9 +77,12 @@ function AdminPage() {
   const search = Route.useSearch();
   const qc = useQueryClient();
   const [boostFor, setBoostFor] = useState<string | null>(null);
+  const [editUserOpen, setEditUserOpen] = useState<string | null>(null);
+  const [editGroupOpen, setEditGroupOpen] = useState<string | null>(null);
+  const [editChannelOpen, setEditChannelOpen] = useState<string | null>(null);
 
   useEffect(() => {
-    if (me && me.role !== "admin") nav({ to: "/chats" });
+    if (me && me.role !== "admin" && me.role !== "superadmin") nav({ to: "/chats" });
   }, [me, nav]);
   useEffect(() => { seedAdminExtras(); }, []);
 
@@ -105,9 +111,9 @@ function AdminPage() {
   );
 
   const filteredAudits = useMemo(() => {
-    const q = search.au_user.toLowerCase().trim();
-    const from = toDayStart(search.au_from);
-    const to = toDayEnd(search.au_to);
+    const q = (search.au_user ?? "").toLowerCase().trim();
+    const from = toDayStart(search.au_from ?? "");
+    const to = toDayEnd(search.au_to ?? "");
     return audits.filter((a) => {
       if (search.au_action && a.action !== search.au_action) return false;
       if (from && a.createdAt < from) return false;
@@ -122,9 +128,9 @@ function AdminPage() {
   }, [audits, users, search.au_user, search.au_action, search.au_from, search.au_to]);
 
   const filteredBoosts = useMemo(() => {
-    const q = search.bo_user.toLowerCase().trim();
-    const from = toDayStart(search.bo_from);
-    const to = toDayEnd(search.bo_to);
+    const q = (search.bo_user ?? "").toLowerCase().trim();
+    const from = toDayStart(search.bo_from ?? "");
+    const to = toDayEnd(search.bo_to ?? "");
     return boosts.filter((b) => {
       if (search.bo_kind && b.kind !== search.bo_kind) return false;
       if (from && b.createdAt < from) return false;
@@ -138,7 +144,7 @@ function AdminPage() {
     });
   }, [boosts, users, search.bo_user, search.bo_kind, search.bo_from, search.bo_to]);
 
-  if (!me || me.role !== "admin") return null;
+  if (!me || (me.role !== "admin" && me.role !== "superadmin")) return null;
 
   const statCards = [
     { label: "Users", value: stats?.users || 0, icon: Users },
@@ -158,60 +164,99 @@ function AdminPage() {
   const auActive = !!(search.au_user || search.au_action || search.au_from || search.au_to);
   const boActive = !!(search.bo_user || search.bo_kind || search.bo_from || search.bo_to);
 
+  const groups = getState().chats.filter((c) => c.type === "group");
+  const channels = getState().channels;
+
   return (
     <FeatureBoundary name="admin">
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 items-center border-b bg-card px-4">
+        <header className="flex h-16 items-center gap-3 border-b bg-card px-4">
+          <Shield className="h-5 w-5 text-primary" />
           <h1 className="text-xl font-semibold">Admin Panel</h1>
+          <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary uppercase">
+            {me.role}
+          </span>
         </header>
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-            {statCards.map((s) => (
-              <Card key={s.label} className="p-4">
-                <div className="flex items-center gap-2 text-muted-foreground text-xs">
-                  <s.icon className="h-4 w-4" aria-hidden="true" /> {s.label}
-                </div>
-                <p className="mt-1 text-2xl font-semibold">{s.value}</p>
-              </Card>
-            ))}
-          </div>
-
           <Tabs
-            value={search.tab}
+            value={search.tab ?? "users"}
             onValueChange={(v) => setSearch({ tab: v })}
             className="w-full"
           >
-            <TabsList className="flex-wrap h-auto">
-              <TabsTrigger value="users">Users</TabsTrigger>
-              <TabsTrigger value="chats">Chats & Groups</TabsTrigger>
-              <TabsTrigger value="channels">Channels</TabsTrigger>
-              <TabsTrigger value="posts">Posts</TabsTrigger>
-              <TabsTrigger value="statuses">Statuses</TabsTrigger>
-              <TabsTrigger value="reports">Reports</TabsTrigger>
-              <TabsTrigger value="audits">Audit Log</TabsTrigger>
-              <TabsTrigger value="boosts">Boosts</TabsTrigger>
+            <TabsList className="mb-4 flex-wrap h-auto">
+              <TabsTrigger value="users" className="gap-1.5"><Users className="h-3.5 w-3.5" />Users</TabsTrigger>
+              <TabsTrigger value="groups" className="gap-1.5"><MessageCircle className="h-3.5 w-3.5" />Groups</TabsTrigger>
+              <TabsTrigger value="channels" className="gap-1.5"><Radio className="h-3.5 w-3.5" />Channels</TabsTrigger>
+              <TabsTrigger value="system" className="gap-1.5"><ShieldAlert className="h-3.5 w-3.5" />System</TabsTrigger>
             </TabsList>
 
+            {/* ─── USERS TAB ──────────────────────────────────────────── */}
             <TabsContent value="users">
               <Table>
-                <TableHeader><TableRow>
-                  <TableHead>User</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
-                </TableRow></TableHeader>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
                 <TableBody>
                   {users.map((u) => (
                     <TableRow key={u.id}>
-                      <TableCell className="flex items-center gap-2"><UserAvatar name={u.displayName} src={u.avatar} size={28} />{u.displayName}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <UserAvatar name={u.displayName} src={u.avatar} size={28} />
+                          {u.displayName}
+                        </div>
+                      </TableCell>
                       <TableCell>{u.email}</TableCell>
-                      <TableCell>{u.role}</TableCell>
-                      <TableCell>{u.banned ? <span className="text-destructive">Banned</span> : "Active"}</TableCell>
-                      <TableCell className="text-right">
-                        <Button size="sm" variant={u.banned ? "outline" : "destructive"} onClick={async () => {
-                          await toggleBan(u.id, me.id);
-                          toast.success(u.banned ? "User unbanned" : "User banned");
-                          qc.invalidateQueries();
-                        }}>
-                          {u.banned ? "Unban" : "Ban"}
-                        </Button>
+                      <TableCell>
+                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                          u.role === "superadmin" ? "bg-purple-100 text-purple-700" :
+                          u.role === "admin" ? "bg-blue-100 text-blue-700" :
+                          "bg-muted text-muted-foreground"
+                        }`}>
+                          {u.role}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {u.banned ? <span className="text-destructive font-medium">Banned</span> : "Active"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          <Button size="sm" variant={u.banned ? "outline" : "destructive"}
+                            onClick={async () => {
+                              await toggleBan(u.id, me.id);
+                              toast.success(u.banned ? "User unbanned" : "User banned");
+                              qc.invalidateQueries({ queryKey: ["users"] });
+                            }}>
+                            {u.banned ? "Unban" : "Ban"}
+                          </Button>
+                          <Button size="sm" variant="outline" className="gap-1"
+                            onClick={() => setEditUserOpen(u.id)}>
+                            <Edit2 className="h-3 w-3" />
+                          </Button>
+                          <Button size="sm" variant="outline" className="gap-1"
+                            title="Reset Password"
+                            onClick={async () => {
+                              const temp = await resetUserPassword(u.id, me.id);
+                              toast.success(`Temp password: ${temp}`, { duration: 8000 });
+                              qc.invalidateQueries({ queryKey: ["users"] });
+                            }}>
+                            <RefreshCw className="h-3 w-3" />
+                          </Button>
+                          <Button size="sm" variant="outline" className="gap-1"
+                            title="Force Logout"
+                            onClick={async () => {
+                              await forceLogoutUser(u.id, me.id);
+                              toast.success("User logged out");
+                              qc.invalidateQueries({ queryKey: ["users"] });
+                            }}>
+                            <LogOut className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -219,216 +264,559 @@ function AdminPage() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="chats">
+            {/* ─── GROUPS TAB ─────────────────────────────────────────── */}
+            <TabsContent value="groups">
               <Table>
-                <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Type</TableHead><TableHead>Members</TableHead></TableRow></TableHeader>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Group</TableHead>
+                    <TableHead>Members</TableHead>
+                    <TableHead>Owner</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
                 <TableBody>
-                  {getState().chats.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell>{c.name || c.memberIds.map((id) => users.find((u) => u.id === id)?.displayName).join(", ")}</TableCell>
-                      <TableCell>{c.type}</TableCell>
-                      <TableCell>{c.memberIds.length}</TableCell>
-                    </TableRow>
-                  ))}
+                  {groups.map((g) => {
+                    const owner = users.find((u) => u.id === g.ownerId);
+                    return (
+                      <TableRow key={g.id}>
+                        <TableCell className="font-medium">{g.name || "Unnamed Group"}</TableCell>
+                        <TableCell>{g.memberIds.length}</TableCell>
+                        <TableCell>{owner?.displayName || g.ownerId}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            <Button size="sm" variant="outline" className="gap-1"
+                              onClick={() => setEditGroupOpen(g.id)}>
+                              <Edit2 className="h-3 w-3" /> Edit
+                            </Button>
+                            <Button size="sm" variant="destructive" className="gap-1"
+                              onClick={async () => {
+                                if (!confirm(`Delete group "${g.name}"? This cannot be undone.`)) return;
+                                await deleteGroup(g.id, me.id);
+                                toast.success("Group deleted");
+                                qc.invalidateQueries();
+                              }}>
+                              <Trash2 className="h-3 w-3" /> Delete
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {groups.length === 0 && (
+                    <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">No groups yet</TableCell></TableRow>
+                  )}
                 </TableBody>
               </Table>
             </TabsContent>
 
+            {/* ─── CHANNELS TAB ───────────────────────────────────────── */}
             <TabsContent value="channels">
-              <Table>
-                <TableHeader><TableRow><TableHead>Channel</TableHead><TableHead>Subscribers</TableHead><TableHead>Posts</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {getState().channels.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell>{c.name}</TableCell>
-                      <TableCell>{c.memberIds.length}</TableCell>
-                      <TableCell>{posts.filter((p) => p.channelId === c.id).length}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="posts">
-              <Table>
-                <TableHeader><TableRow>
-                  <TableHead>Body</TableHead><TableHead>Likes</TableHead><TableHead>Views</TableHead><TableHead className="text-right">Actions</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {posts.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="max-w-md truncate">{p.body}</TableCell>
-                      <TableCell>{likeCount(p)}</TableCell>
-                      <TableCell>{viewCount(p)}</TableCell>
-                      <TableCell className="text-right space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => setBoostFor(p.id)}>Boost</Button>
-                        <Button size="sm" variant="destructive" onClick={async () => {
-                          await deletePostAsAdmin(p.id, me.id);
-                          toast.success("Post deleted");
-                          qc.invalidateQueries();
-                        }}>Delete</Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="statuses">
-              <Table>
-                <TableHeader><TableRow><TableHead>User</TableHead><TableHead>Kind</TableHead><TableHead>Created</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {statuses.map((s) => (
-                    <TableRow key={s.id}>
-                      <TableCell>{users.find((u) => u.id === s.userId)?.displayName}</TableCell>
-                      <TableCell>{s.kind}</TableCell>
-                      <TableCell>{timeAgo(s.createdAt)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="reports">
-              <Table>
-                <TableHeader><TableRow><TableHead>Reporter</TableHead><TableHead>Target</TableHead><TableHead>Reason</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {reports.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell>{users.find((u) => u.id === r.reporterId)?.displayName || r.reporterId}</TableCell>
-                      <TableCell>{r.targetType}:{r.targetId.slice(0, 6)}</TableCell>
-                      <TableCell>{r.reason}</TableCell>
-                      <TableCell>{r.status}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="audits">
-              <div className="mb-3 grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5">
-                <div className="lg:col-span-2">
-                  <Label htmlFor="au_user" className="text-xs">User</Label>
-                  <Input
-                    id="au_user"
-                    placeholder="Name or email…"
-                    value={search.au_user}
-                    onChange={(e) => setSearch({ au_user: e.target.value })}
-                  />
-                </div>
+              <div className="space-y-6">
+                {/* Channel list */}
                 <div>
-                  <Label htmlFor="au_action" className="text-xs">Action</Label>
-                  <Select value={search.au_action || "__all"} onValueChange={(v) => setSearch({ au_action: v === "__all" ? "" : v })}>
-                    <SelectTrigger id="au_action"><SelectValue placeholder="All actions" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all">All actions</SelectItem>
-                      {auditActions.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <h3 className="mb-2 font-semibold text-sm text-muted-foreground uppercase tracking-wide">Channels</h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Subscribers</TableHead>
+                        <TableHead>Posts</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {channels.map((ch) => (
+                        <TableRow key={ch.id}>
+                          <TableCell className="font-medium">{ch.name}</TableCell>
+                          <TableCell>{ch.memberIds.length}</TableCell>
+                          <TableCell>{posts.filter((p) => p.channelId === ch.id).length}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                              <Button size="sm" variant="outline" className="gap-1"
+                                onClick={() => setEditChannelOpen(ch.id)}>
+                                <Edit2 className="h-3 w-3" /> Edit
+                              </Button>
+                              <Button size="sm" variant="destructive" className="gap-1"
+                                onClick={async () => {
+                                  if (!confirm(`Delete channel "${ch.name}"? This cannot be undone.`)) return;
+                                  await deleteChannel(ch.id, me.id);
+                                  toast.success("Channel deleted");
+                                  qc.invalidateQueries();
+                                }}>
+                                <Trash2 className="h-3 w-3" /> Delete
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {channels.length === 0 && (
+                        <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">No channels yet</TableCell></TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
                 </div>
+
+                {/* Post list */}
                 <div>
-                  <Label htmlFor="au_from" className="text-xs">From</Label>
-                  <Input id="au_from" type="date" value={search.au_from} onChange={(e) => setSearch({ au_from: e.target.value })} />
+                  <h3 className="mb-2 font-semibold text-sm text-muted-foreground uppercase tracking-wide">Posts</h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Body</TableHead>
+                        <TableHead>Likes</TableHead>
+                        <TableHead>Views</TableHead>
+                        <TableHead>Pinned</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {posts.map((p) => (
+                        <TableRow key={p.id} className={p.pinned ? "bg-primary/5" : ""}>
+                          <TableCell className="max-w-xs truncate">{p.body}</TableCell>
+                          <TableCell>{likeCount(p)}</TableCell>
+                          <TableCell>{viewCount(p)}</TableCell>
+                          <TableCell>{p.pinned ? <Pin className="h-4 w-4 text-primary" /> : "—"}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                              <Button size="sm" variant="outline" onClick={() => setBoostFor(p.id)}>
+                                <TrendingUp className="h-3 w-3 mr-1" /> Boost
+                              </Button>
+                              <Button size="sm" variant="outline"
+                                onClick={async () => {
+                                  if (p.pinned) {
+                                    await unpinPost(p.id, me.id);
+                                    toast.success("Post unpinned");
+                                  } else {
+                                    await pinPost(p.id, me.id);
+                                    toast.success("Post pinned");
+                                  }
+                                  qc.invalidateQueries({ queryKey: ["admin.posts"] });
+                                }}>
+                                {p.pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                              </Button>
+                              <Button size="sm" variant="destructive"
+                                onClick={async () => {
+                                  await deletePostAsAdmin(p.id, me.id);
+                                  toast.success("Post deleted");
+                                  qc.invalidateQueries();
+                                }}>
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
+              </div>
+            </TabsContent>
+
+            {/* ─── SYSTEM TAB ─────────────────────────────────────────── */}
+            <TabsContent value="system">
+              <div className="space-y-6">
+                {/* Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {statCards.map((s) => (
+                    <Card key={s.label} className="p-4">
+                      <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                        <s.icon className="h-4 w-4" aria-hidden="true" /> {s.label}
+                      </div>
+                      <p className="mt-1 text-2xl font-semibold">{s.value}</p>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Reports */}
                 <div>
-                  <Label htmlFor="au_to" className="text-xs">To</Label>
-                  <Input id="au_to" type="date" value={search.au_to} onChange={(e) => setSearch({ au_to: e.target.value })} />
+                  <h3 className="mb-2 font-semibold text-sm text-muted-foreground uppercase tracking-wide">Reports</h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Reporter</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {reports.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell>{users.find((u) => u.id === r.reporterId)?.displayName || r.reporterId}</TableCell>
+                          <TableCell>{r.targetType}:{r.targetId.slice(0, 6)}</TableCell>
+                          <TableCell>{r.reason}</TableCell>
+                          <TableCell>
+                            <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                              r.status === "resolved" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
+                            }`}>{r.status}</span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" variant="outline"
+                              onClick={async () => {
+                                const next = r.status === "open" ? "resolved" : "open";
+                                await updateReportStatus(r.id, me.id, next);
+                                toast.success(`Report marked ${next}`);
+                                qc.invalidateQueries({ queryKey: ["admin.reports"] });
+                              }}>
+                              {r.status === "open" ? "Resolve" : "Reopen"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
-                {auActive && (
-                  <div className="sm:col-span-2 lg:col-span-5 flex justify-between text-xs text-muted-foreground">
-                    <span>{filteredAudits.length} of {audits.length} entries</span>
-                    <Button size="sm" variant="ghost" onClick={auClear}>
-                      <X className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Clear filters
+
+                {/* Audit Log */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">Audit Log</h3>
+                    <Button size="sm" variant="outline" className="gap-1"
+                      onClick={() => {
+                        const csv = exportAuditLog({
+                          action: search.au_action || undefined,
+                          from: toDayStart(search.au_from ?? "") ?? undefined,
+                          to: toDayEnd(search.au_to ?? "") ?? undefined,
+                        });
+                        const blob = new Blob([csv], { type: "text/csv" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url; a.download = "audit_log.csv"; a.click();
+                        URL.revokeObjectURL(url);
+                      }}>
+                      <Download className="h-3.5 w-3.5" /> Export CSV
                     </Button>
                   </div>
-                )}
-              </div>
-              {filteredAudits.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  No results match your filters.
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Action</TableHead><TableHead>Target</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {filteredAudits.map((a) => (
-                      <TableRow key={a.id}>
-                        <TableCell>{timeAgo(a.createdAt)}</TableCell>
-                        <TableCell>{users.find((u) => u.id === a.adminId)?.displayName || a.adminId}</TableCell>
-                        <TableCell>{a.action}</TableCell>
-                        <TableCell>{a.targetType}:{a.targetId.slice(0, 6)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </TabsContent>
-
-            <TabsContent value="boosts">
-              <div className="mb-3 grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5">
-                <div className="lg:col-span-2">
-                  <Label htmlFor="bo_user" className="text-xs">Admin</Label>
-                  <Input
-                    id="bo_user"
-                    placeholder="Name or email…"
-                    value={search.bo_user}
-                    onChange={(e) => setSearch({ bo_user: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="bo_kind" className="text-xs">Type</Label>
-                  <Select value={search.bo_kind || "__all"} onValueChange={(v) => setSearch({ bo_kind: v === "__all" ? "" : v })}>
-                    <SelectTrigger id="bo_kind"><SelectValue placeholder="All types" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all">All types</SelectItem>
-                      <SelectItem value="likes">Likes</SelectItem>
-                      <SelectItem value="views">Views</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="bo_from" className="text-xs">From</Label>
-                  <Input id="bo_from" type="date" value={search.bo_from} onChange={(e) => setSearch({ bo_from: e.target.value })} />
-                </div>
-                <div>
-                  <Label htmlFor="bo_to" className="text-xs">To</Label>
-                  <Input id="bo_to" type="date" value={search.bo_to} onChange={(e) => setSearch({ bo_to: e.target.value })} />
-                </div>
-                {boActive && (
-                  <div className="sm:col-span-2 lg:col-span-5 flex justify-between text-xs text-muted-foreground">
-                    <span>{filteredBoosts.length} of {boosts.length} boosts</span>
-                    <Button size="sm" variant="ghost" onClick={boClear}>
-                      <X className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Clear filters
-                    </Button>
+                  <div className="mb-3 grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <div className="lg:col-span-2">
+                      <Label htmlFor="au_user" className="text-xs">User</Label>
+                      <Input id="au_user" placeholder="Name or email…"
+                        value={search.au_user ?? ""} onChange={(e) => setSearch({ au_user: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label htmlFor="au_action" className="text-xs">Action</Label>
+                      <Select value={search.au_action || "__all"} onValueChange={(v) => setSearch({ au_action: v === "__all" ? "" : v })}>
+                        <SelectTrigger id="au_action"><SelectValue placeholder="All actions" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all">All actions</SelectItem>
+                          {auditActions.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="au_from" className="text-xs">From</Label>
+                      <Input id="au_from" type="date" value={search.au_from ?? ""} onChange={(e) => setSearch({ au_from: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label htmlFor="au_to" className="text-xs">To</Label>
+                      <Input id="au_to" type="date" value={search.au_to ?? ""} onChange={(e) => setSearch({ au_to: e.target.value })} />
+                    </div>
+                    {auActive && (
+                      <div className="sm:col-span-2 lg:col-span-5 flex justify-between text-xs text-muted-foreground">
+                        <span>{filteredAudits.length} of {audits.length} entries</span>
+                        <Button size="sm" variant="ghost" onClick={auClear}>
+                          <X className="mr-1 h-3.5 w-3.5" /> Clear filters
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              {filteredBoosts.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  No results match your filters.
+                  {filteredAudits.length === 0 ? (
+                    <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">No results match your filters.</div>
+                  ) : (
+                    <Table>
+                      <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Action</TableHead><TableHead>Target</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {filteredAudits.map((a) => (
+                          <TableRow key={a.id}>
+                            <TableCell>{timeAgo(a.createdAt)}</TableCell>
+                            <TableCell>{users.find((u) => u.id === a.adminId)?.displayName || a.adminId}</TableCell>
+                            <TableCell><code className="text-xs bg-muted px-1.5 py-0.5 rounded">{a.action}</code></TableCell>
+                            <TableCell>{a.targetType}:{a.targetId.slice(0, 8)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
                 </div>
-              ) : (
-                <Table>
-                  <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Post</TableHead><TableHead>Kind</TableHead><TableHead>Amount</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {filteredBoosts.map((b) => (
-                      <TableRow key={b.id}>
-                        <TableCell>{timeAgo(b.createdAt)}</TableCell>
-                        <TableCell>{users.find((u) => u.id === b.adminId)?.displayName || b.adminId}</TableCell>
-                        <TableCell>{b.postId.slice(0, 6)}</TableCell>
-                        <TableCell>{b.kind}</TableCell>
-                        <TableCell>+{b.amount}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+
+                {/* Boost History */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">Boost History</h3>
+                  </div>
+                  <div className="mb-3 grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <div className="lg:col-span-2">
+                      <Label htmlFor="bo_user" className="text-xs">Admin</Label>
+                      <Input id="bo_user" placeholder="Name or email…"
+                        value={search.bo_user ?? ""} onChange={(e) => setSearch({ bo_user: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label htmlFor="bo_kind" className="text-xs">Type</Label>
+                      <Select value={search.bo_kind || "__all"} onValueChange={(v) => setSearch({ bo_kind: v === "__all" ? "" : v })}>
+                        <SelectTrigger id="bo_kind"><SelectValue placeholder="All types" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all">All types</SelectItem>
+                          <SelectItem value="likes">Likes</SelectItem>
+                          <SelectItem value="views">Views</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="bo_from" className="text-xs">From</Label>
+                      <Input id="bo_from" type="date" value={search.bo_from ?? ""} onChange={(e) => setSearch({ bo_from: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label htmlFor="bo_to" className="text-xs">To</Label>
+                      <Input id="bo_to" type="date" value={search.bo_to ?? ""} onChange={(e) => setSearch({ bo_to: e.target.value })} />
+                    </div>
+                    {boActive && (
+                      <div className="sm:col-span-2 lg:col-span-5 flex justify-between text-xs text-muted-foreground">
+                        <span>{filteredBoosts.length} of {boosts.length} boosts</span>
+                        <Button size="sm" variant="ghost" onClick={boClear}>
+                          <X className="mr-1 h-3.5 w-3.5" /> Clear filters
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {filteredBoosts.length === 0 ? (
+                    <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">No results.</div>
+                  ) : (
+                    <Table>
+                      <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Admin</TableHead><TableHead>Post</TableHead><TableHead>Kind</TableHead><TableHead>Amount</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {filteredBoosts.map((b) => (
+                          <TableRow key={b.id}>
+                            <TableCell>{timeAgo(b.createdAt)}</TableCell>
+                            <TableCell>{users.find((u) => u.id === b.adminId)?.displayName || b.adminId}</TableCell>
+                            <TableCell>{b.postId.slice(0, 8)}</TableCell>
+                            <TableCell>{b.kind}</TableCell>
+                            <TableCell>+{b.amount}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
         </div>
 
         <BoostDialog postId={boostFor} open={!!boostFor} onOpenChange={(o) => !o && setBoostFor(null)} />
+
+        {/* Edit User Dialog */}
+        {editUserOpen && (
+          <EditUserDialog
+            userId={editUserOpen}
+            users={users}
+            adminId={me.id}
+            onClose={() => setEditUserOpen(null)}
+            onSaved={() => { qc.invalidateQueries({ queryKey: ["users"] }); setEditUserOpen(null); }}
+          />
+        )}
+
+        {/* Edit Group Dialog */}
+        {editGroupOpen && (
+          <EditGroupDialog
+            groupId={editGroupOpen}
+            users={users}
+            adminId={me.id}
+            onClose={() => setEditGroupOpen(null)}
+            onSaved={() => { qc.invalidateQueries(); setEditGroupOpen(null); }}
+          />
+        )}
+
+        {/* Edit Channel Dialog */}
+        {editChannelOpen && (
+          <EditChannelDialog
+            channelId={editChannelOpen}
+            users={users}
+            adminId={me.id}
+            onClose={() => setEditChannelOpen(null)}
+            onSaved={() => { qc.invalidateQueries(); setEditChannelOpen(null); }}
+          />
+        )}
       </div>
     </FeatureBoundary>
+  );
+}
+
+// ─── Edit User Dialog ────────────────────────────────────────────────────
+function EditUserDialog({ userId, users, adminId, onClose, onSaved }: {
+  userId: string; users: any[]; adminId: string; onClose: () => void; onSaved: () => void;
+}) {
+  const user = users.find((u) => u.id === userId);
+  const [displayName, setDisplayName] = useState(user?.displayName ?? "");
+  const [bio, setBio] = useState(user?.bio ?? "");
+  const [role, setRole] = useState(user?.role ?? "user");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await editUserProfile(userId, adminId, { displayName, bio, role });
+      toast.success("User profile updated");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit User — {user?.displayName}</DialogTitle></DialogHeader>
+        <div className="space-y-3 pt-2">
+          <div><Label className="text-sm">Display Name</Label>
+            <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          </div>
+          <div><Label className="text-sm">Bio</Label>
+            <Textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} />
+          </div>
+          <div><Label className="text-sm">Role</Label>
+            <Select value={role} onValueChange={setRole}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="user">User</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="superadmin">Super Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Edit Group Dialog ───────────────────────────────────────────────────
+function EditGroupDialog({ groupId, users, adminId, onClose, onSaved }: {
+  groupId: string; users: any[]; adminId: string; onClose: () => void; onSaved: () => void;
+}) {
+  const group = getState().chats.find((c) => c.id === groupId);
+  const [name, setName] = useState(group?.name ?? "");
+  const [newOwner, setNewOwner] = useState(group?.ownerId ?? "");
+  const [kickUser, setKickUser] = useState("");
+  const [saving, setSaving] = useState(false);
+  const qc = useQueryClient();
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await editGroup(groupId, adminId, { name });
+      if (newOwner && newOwner !== group?.ownerId) {
+        await transferGroupOwnership(groupId, newOwner, adminId);
+      }
+      toast.success("Group updated");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleKick = async () => {
+    if (!kickUser) return;
+    await removeGroupMember(groupId, kickUser, adminId);
+    toast.success("Member removed");
+    qc.invalidateQueries();
+  };
+
+  const members = (group?.memberIds ?? []).map((id) => users.find((u) => u.id === id)).filter(Boolean);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit Group — {group?.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3 pt-2">
+          <div><Label className="text-sm">Group Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-sm">Transfer Ownership</Label>
+            <Select value={newOwner} onValueChange={setNewOwner}>
+              <SelectTrigger><SelectValue placeholder="Select new owner" /></SelectTrigger>
+              <SelectContent>
+                {members.map((u: any) => <SelectItem key={u.id} value={u.id}>{u.displayName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-sm">Remove Member</Label>
+            <div className="flex gap-2">
+              <Select value={kickUser} onValueChange={setKickUser}>
+                <SelectTrigger><SelectValue placeholder="Select member to remove" /></SelectTrigger>
+                <SelectContent>
+                  {members.map((u: any) => <SelectItem key={u.id} value={u.id}>{u.displayName}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button variant="destructive" size="sm" onClick={handleKick} disabled={!kickUser}>
+                <UserMinus className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Edit Channel Dialog ─────────────────────────────────────────────────
+function EditChannelDialog({ channelId, users, adminId, onClose, onSaved }: {
+  channelId: string; users: any[]; adminId: string; onClose: () => void; onSaved: () => void;
+}) {
+  const channel = getState().channels.find((c) => c.id === channelId);
+  const [name, setName] = useState(channel?.name ?? "");
+  const [description, setDescription] = useState(channel?.description ?? "");
+  const [ownerId, setOwnerId] = useState(channel?.ownerId ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await editChannel(channelId, adminId, { name, description, ownerId });
+      toast.success("Channel updated");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit Channel — {channel?.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3 pt-2">
+          <div><Label className="text-sm">Channel Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div><Label className="text-sm">Description</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+          </div>
+          <div>
+            <Label className="text-sm">Transfer Ownership</Label>
+            <Select value={ownerId} onValueChange={setOwnerId}>
+              <SelectTrigger><SelectValue placeholder="Select new owner" /></SelectTrigger>
+              <SelectContent>
+                {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.displayName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

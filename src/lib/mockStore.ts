@@ -2,7 +2,7 @@
 // All *Api modules read/write here. Swap for Supabase later without changing consumers.
 import { publish } from "./eventBus";
 
-export type Role = "user" | "admin";
+export type Role = "user" | "admin" | "superadmin";
 export type User = {
   id: string;
   email: string;
@@ -13,6 +13,7 @@ export type User = {
   banned?: boolean;
   online?: boolean;
   bio?: string;
+  forcedLogout?: boolean;
 };
 
 export type MessageKind = "text" | "image" | "voice";
@@ -79,6 +80,7 @@ export type ChannelPost = {
   createdAt: number;
   boostedLikes?: number;
   boostedViews?: number;
+  pinned?: boolean;
 };
 export type Comment = {
   id: string;
