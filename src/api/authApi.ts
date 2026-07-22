@@ -143,10 +143,11 @@ export async function signUp(input: {
 
 export async function signInWithOAuth(provider: "google" | "apple") {
   const supabase = ensureSupabase();
+  const redirectTo = `${window.location.origin}/chats`;
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
     options: {
-      redirectTo: window.location.origin,
+      redirectTo,
     },
   });
 
