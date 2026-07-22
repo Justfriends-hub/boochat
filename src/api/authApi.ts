@@ -141,6 +141,23 @@ export async function signUp(input: {
   };
 }
 
+export async function signInWithOAuth(provider: "google" | "apple") {
+  const supabase = ensureSupabase();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo: window.location.origin,
+    },
+  });
+
+  if (error) {
+    console.error(`Supabase OAuth error (${provider}):`, error);
+    throw new Error(error.message || JSON.stringify(error));
+  }
+
+  return data;
+}
+
 export async function signOut() {
   const supabase = ensureSupabase();
   await supabase.auth.signOut();

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { signIn } from "@/api/authApi";
+import { signIn, signInWithOAuth } from "@/api/authApi";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/auth/login")({
@@ -34,6 +34,16 @@ function LoginPage() {
     } finally { setBusy(false); }
   };
 
+  const handleOAuth = async (provider: "google" | "apple") => {
+    setBusy(true);
+    try {
+      await signInWithOAuth(provider);
+    } catch (e: any) {
+      toast.error(e.message || `Unable to sign in with ${provider}.`);
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
       <Card className="w-full max-w-md p-8">
@@ -57,9 +67,17 @@ function LoginPage() {
           <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {["Google", "Apple"].map((p) => (
-            <Button key={p} variant="outline" onClick={() => toast.info(`Connect Supabase to enable ${p} sign-in`)}>
-              {p}
+          {[
+            { label: "Google", provider: "google" as const },
+            { label: "Apple", provider: "apple" as const },
+          ].map((p) => (
+            <Button
+              key={p.label}
+              variant="outline"
+              onClick={() => handleOAuth(p.provider)}
+              disabled={busy}
+            >
+              {p.label}
             </Button>
           ))}
         </div>
