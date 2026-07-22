@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock } from "lucide-react";
+import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
@@ -35,6 +35,7 @@ function ChannelPage() {
   const [postText, setPostText] = useState("");
   const [postImage, setPostImage] = useState<string | undefined>(undefined);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: channel } = useQuery({ queryKey: ["channel", channelId], queryFn: () => getChannel(channelId) });
@@ -123,10 +124,18 @@ function ChannelPage() {
           <p className="truncate text-xs text-muted-foreground">{channel?.memberIds.length} subscribers</p>
         </div>
         <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => setInfoOpen(true)}
+          className="shrink-0"
+        >
+          <Info className="h-5 w-5" />
+        </Button>
+        <Button
           size="sm"
           variant={isSubscribed ? "outline" : "default"}
           onClick={handleSubscribe}
-          className="rounded-full"
+          className="rounded-full shrink-0"
         >
           {isSubscribed ? "Subscribed" : "Subscribe"}
         </Button>
@@ -216,6 +225,41 @@ function ChannelPage() {
       <Sheet open={!!openPost} onOpenChange={(o) => !o && setOpenPost(null)}>
         <SheetContent side="bottom" className="h-[80dvh] flex flex-col p-0">
           {openPost && <PostDetail post={openPost} onClose={() => setOpenPost(null)} />}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={infoOpen} onOpenChange={setInfoOpen}>
+        <SheetContent side="bottom" className="h-auto flex flex-col p-0">
+          <SheetHeader className="p-4 border-b">
+            <SheetTitle>Channel Information</SheetTitle>
+          </SheetHeader>
+          <div className="p-4 space-y-4">
+            {channel && (
+              <>
+                <div className="flex items-center gap-3">
+                  <UserAvatar name={channel.name} src={channel.avatar} size={64} />
+                  <div>
+                    <h2 className="font-semibold text-lg">{channel.name}</h2>
+                    <p className="text-sm text-muted-foreground">{channel.description}</p>
+                  </div>
+                </div>
+                <div className="space-y-2 pt-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Total Members</span>
+                    <span className="font-semibold">{channel.memberIds.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Channel Owner</span>
+                    <span className="font-semibold">{users.find((u) => u.id === channel.ownerId)?.displayName || "Unknown"}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Created</span>
+                    <span className="font-semibold text-sm">{new Date(channel.createdAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </SheetContent>
       </Sheet>
     </div>
