@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -24,12 +24,15 @@ export const Route = createFileRoute("/_app/groups")({
 
 function GroupsPage() {
   const me = useAuth();
+  const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const qc = useQueryClient();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
+
+  const isGroupDetailRoute = typeof pathname === "string" && pathname !== "/groups" && pathname.startsWith("/groups/");
 
   const { data: chats = [] } = useQuery({
     queryKey: ["chats", me?.id ?? ""],
@@ -49,6 +52,16 @@ function GroupsPage() {
       <div className="flex min-h-[100dvh] items-center justify-center bg-background">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
+    );
+  }
+
+  if (isGroupDetailRoute) {
+    return (
+      <FeatureBoundary name="groups">
+        <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
+          <Outlet />
+        </div>
+      </FeatureBoundary>
     );
   }
 

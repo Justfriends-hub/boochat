@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Radio } from "lucide-react";
@@ -13,9 +13,22 @@ export const Route = createFileRoute("/_app/channels")({
 });
 
 function ChannelsPage() {
+  const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const qc = useQueryClient();
   const { data: channels = [] } = useQuery({ queryKey: ["channels"], queryFn: listChannels });
   useEffect(() => subscribeToChannels(() => qc.invalidateQueries({ queryKey: ["channels"] })), [qc]);
+
+  const isChannelDetailRoute = typeof pathname === "string" && pathname !== "/channels" && pathname.startsWith("/channels/");
+
+  if (isChannelDetailRoute) {
+    return (
+      <FeatureBoundary name="channels">
+        <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
+          <Outlet />
+        </div>
+      </FeatureBoundary>
+    );
+  }
 
   return (
     <FeatureBoundary name="channels">
