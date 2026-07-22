@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { z } from "zod";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,7 +46,21 @@ const searchSchema = z.object({
 });
 
 export const Route = createFileRoute("/_app/admin")({
-  validateSearch: zodValidator(searchSchema),
+  validateSearch: (search) => {
+    const result = searchSchema.safeParse(search);
+    if (result.success) return result.data;
+    return {
+      tab: "users",
+      au_user: "",
+      au_action: "",
+      au_from: "",
+      au_to: "",
+      bo_user: "",
+      bo_kind: "",
+      bo_from: "",
+      bo_to: "",
+    };
+  },
   component: AdminPage,
   head: () => ({ meta: [{ title: "Admin — Meshly" }] }),
 });

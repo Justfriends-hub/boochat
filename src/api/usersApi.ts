@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import type { User } from "@/lib/mockStore";
 
@@ -16,6 +16,7 @@ function mapProfile(profile: any): User {
 }
 
 export async function listUsers(): Promise<User[]> {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase
     .from("profiles")
     .select("id,email,display_name,avatar_url,bio,online,banned")
@@ -29,6 +30,7 @@ export async function listUsers(): Promise<User[]> {
 }
 
 export async function getUser(id: string): Promise<User | undefined> {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase
     .from("profiles")
     .select("id,email,display_name,avatar_url,bio,online,banned")
@@ -42,6 +44,7 @@ export async function getUser(id: string): Promise<User | undefined> {
 }
 
 export async function updateUser(id: string, patch: Partial<User>) {
+  const supabase = ensureSupabase();
   const update: Record<string, any> = {};
   if (patch.displayName !== undefined) update.display_name = patch.displayName;
   if (patch.avatar !== undefined) update.avatar_url = patch.avatar;

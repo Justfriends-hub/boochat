@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { publish, subscribe } from "@/lib/eventBus";
 import type { User } from "@/lib/mockStore";
 
@@ -32,6 +32,14 @@ export function subscribeAuth(cb: () => void) {
 export async function initializeAuth() {
   if (initializePromise) return initializePromise;
   initializePromise = (async () => {
+    if (!supabaseConfigured) {
+      cachedUser = null;
+      authReady = true;
+      publishAuthChange();
+      return;
+    }
+
+    const supabase = ensureSupabase();
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.user?.id) {
       await refreshCurrentUser(sessionData.session.user.id);
@@ -54,6 +62,7 @@ export async function initializeAuth() {
 }
 
 async function refreshCurrentUser(userId: string) {
+  const supabase = ensureSupabase();
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("id,email,display_name,avatar_url,bio,online,banned")
@@ -82,6 +91,7 @@ async function refreshCurrentUser(userId: string) {
 }
 
 export async function signIn(email: string, password: string): Promise<User> {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || !data.session) {
     throw new Error(error?.message || "Unable to sign in.");
@@ -97,6 +107,7 @@ export async function signUp(input: {
   password: string;
   displayName: string;
 }): Promise<User> {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
     password: input.password,
@@ -129,6 +140,7 @@ export async function signUp(input: {
 }
 
 export async function signOut() {
+  const supabase = ensureSupabase();
   await supabase.auth.signOut();
   cachedUser = null;
   publishAuthChange();

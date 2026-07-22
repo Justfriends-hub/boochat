@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import type { Status } from "@/lib/mockStore";
 
@@ -26,6 +26,7 @@ function mapStatus(row: any): Status {
 
 async function getMediaUrl(mediaUrl: string) {
   if (!mediaUrl) return mediaUrl;
+  const supabase = ensureSupabase();
   const { data, error } = await supabase.storage
     .from(STATUS_BUCKET)
     .createSignedUrl(mediaUrl, 60 * 60);
@@ -36,6 +37,7 @@ async function getMediaUrl(mediaUrl: string) {
 }
 
 export async function listActiveStatuses(): Promise<Status[]> {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase
     .from("statuses")
     .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
@@ -62,6 +64,7 @@ export async function createStatus(input: {
   const extension = blob.type.split("/")[1] || "bin";
   const path = `${input.userId}/${Date.now()}.${extension}`;
 
+  const supabase = ensureSupabase();
   const { error: uploadError } = await supabase.storage
     .from(STATUS_BUCKET)
     .upload(path, blob);
@@ -88,6 +91,7 @@ export async function createStatus(input: {
 }
 
 export async function markStatusViewed(id: string, userId: string) {
+  const supabase = ensureSupabase();
   const { error } = await supabase
     .from("status_views")
     .upsert({ status_id: id, viewer_id: userId }, { onConflict: ["status_id", "viewer_id"] });
@@ -96,6 +100,7 @@ export async function markStatusViewed(id: string, userId: string) {
 }
 
 export async function reactToStatus(id: string, userId: string, emoji: string) {
+  const supabase = ensureSupabase();
   const { error } = await supabase
     .from("status_reactions")
     .upsert(
@@ -107,6 +112,7 @@ export async function reactToStatus(id: string, userId: string, emoji: string) {
 }
 
 export async function deleteStatus(id: string) {
+  const supabase = ensureSupabase();
   const { error } = await supabase
     .from("statuses")
     .delete()
@@ -116,6 +122,7 @@ export async function deleteStatus(id: string) {
 }
 
 export function subscribeToStatuses(cb: () => void) {
+  const supabase = ensureSupabase();
   const channel = supabase.channel("statuses");
   channel.on("postgres_changes", { event: "*", schema: "public", table: "statuses" }, () => cb());
   channel.on("postgres_changes", { event: "*", schema: "public", table: "status_views" }, () => cb());

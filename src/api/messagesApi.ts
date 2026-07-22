@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { ensureSupabase } from "@/lib/supabaseClient";
 import type { Message, MessageKind } from "@/lib/mockStore";
 
 function mapMessage(row: any): Message {
@@ -20,6 +20,7 @@ function mapMessage(row: any): Message {
 }
 
 export async function listMessages(chatId: string): Promise<Message[]> {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase
     .from("messages")
     .select("*")
@@ -33,6 +34,7 @@ export async function sendMessage(input: {
   chatId: string; senderId: string; kind: MessageKind; body: string;
   duration?: number; replyTo?: string; forwardedFrom?: string;
 }): Promise<Message> {
+  const supabase = ensureSupabase();
   const insert = {
     chat_id: input.chatId,
     sender_id: input.senderId,
@@ -55,6 +57,7 @@ export async function sendMessage(input: {
 }
 
 export async function editMessage(id: string, body: string) {
+  const supabase = ensureSupabase();
   const { error } = await supabase
     .from("messages")
     .update({ body, edited_at: new Date().toISOString() })
@@ -63,6 +66,7 @@ export async function editMessage(id: string, body: string) {
 }
 
 export async function deleteMessage(id: string) {
+  const supabase = ensureSupabase();
   const { error } = await supabase
     .from("messages")
     .update({ deleted_at: new Date().toISOString(), body: "" })
@@ -71,6 +75,7 @@ export async function deleteMessage(id: string) {
 }
 
 export async function forwardMessage(id: string, toChatId: string, senderId: string) {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase
     .from("messages")
     .select("*")
@@ -88,11 +93,13 @@ export async function forwardMessage(id: string, toChatId: string, senderId: str
 }
 
 export async function markChatRead(chatId: string, userId: string) {
+  const supabase = ensureSupabase();
   const { error } = await supabase.rpc("mark_messages_read", { _chat_id: chatId });
   if (error) throw new Error(error.message);
 }
 
 export function subscribeToChat(chatId: string, cb: () => void) {
+  const supabase = ensureSupabase();
   const channel = supabase.channel(`chat:${chatId}`);
   channel.on(
     "postgres_changes",

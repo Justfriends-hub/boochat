@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import type { Chat } from "@/lib/mockStore";
 
@@ -21,6 +21,7 @@ function mapChat(chat: any, members: string[], group: any | null): Chat {
 }
 
 async function fetchChatMembers(chatIds: string[]) {
+  const supabase = ensureSupabase();
   const { data, error } = await supabase
     .from("chat_members")
     .select("chat_id,user_id")
@@ -31,6 +32,7 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
+  const supabase = ensureSupabase();
   const { data: membershipRows, error: membershipError } = await supabase
     .from("chat_members")
     .select("chat_id")
@@ -62,6 +64,7 @@ export async function listChats(userId: string): Promise<Chat[]> {
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
+  const supabase = ensureSupabase();
   const { data: chatRow, error: chatError } = await supabase
     .from("chats")
     .select("*")
@@ -92,6 +95,7 @@ export async function getChat(id: string): Promise<Chat | undefined> {
 }
 
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {
+  const supabase = ensureSupabase();
   const { data: userAChats, error: userAError } = await supabase
     .from("chat_members")
     .select("chat_id")
@@ -151,6 +155,7 @@ export async function createGroup(input: {
   ownerId: string;
   avatar?: string;
 }): Promise<Chat> {
+  const supabase = ensureSupabase();
   const { data: newChat, error: createChatError } = await supabase
     .from("chats")
     .insert([
@@ -188,6 +193,7 @@ export async function createGroup(input: {
 }
 
 export async function updateChat(id: string, patch: Partial<Chat>) {
+  const supabase = ensureSupabase();
   if (patch.name !== undefined || patch.avatar !== undefined) {
     const update: Record<string, any> = {};
     if (patch.name !== undefined) update.name = patch.name;
@@ -212,6 +218,7 @@ export async function updateChat(id: string, patch: Partial<Chat>) {
 }
 
 export async function leaveGroup(chatId: string, userId: string) {
+  const supabase = ensureSupabase();
   const { error: memberError } = await supabase
     .from("chat_members")
     .delete()
@@ -236,6 +243,7 @@ export async function leaveGroup(chatId: string, userId: string) {
 }
 
 export function subscribeToChats(cb: () => void) {
+  const supabase = ensureSupabase();
   const channel = supabase.channel("chats");
   channel.on("postgres_changes", { event: "*", schema: "public", table: "chats" }, () => cb());
   channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, () => cb());
