@@ -1,6 +1,6 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
-import type { Status } from "@/lib/mockStore";
+import { getState, setState, type Status } from "@/lib/mockStore";
 
 const STATUS_BUCKET = "status-media";
 
@@ -26,34 +26,44 @@ function mapStatus(row: any): Status {
 
 async function getMediaUrl(mediaUrl: string) {
   if (!mediaUrl) return mediaUrl;
-  const supabase = ensureSupabase();
-  const { data, error } = await supabase.storage
-    .from(STATUS_BUCKET)
-    .createSignedUrl(mediaUrl, 60 * 60);
-  if (error || !data?.signedUrl) {
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase.storage
+      .from(STATUS_BUCKET)
+      .createSignedUrl(mediaUrl, 60 * 60);
+    if (error || !data?.signedUrl) {
+      return mediaUrl;
+    }
+    return data.signedUrl;
+  } catch {
     return mediaUrl;
   }
-  return data.signedUrl;
 }
 
 export async function listActiveStatuses(): Promise<Status[]> {
-  const supabase = ensureSupabase();
-  const { data, error } = await supabase
-    .from("statuses")
-    .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
-    .gt("expires_at", "now()");
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("statuses")
+      .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
+      .gt("expires_at", "now()");
 
-  if (error) throw new Error(error.message);
+    if (!error && data) {
+      const statuses = (data ?? []).map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
+      const signedStatuses = await Promise.all(
+        statuses.map(async (status) => ({
+          ...status,
+          media: await getMediaUrl(status.media),
+        })),
+      );
 
-  const statuses = (data ?? []).map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
-  const signedStatuses = await Promise.all(
-    statuses.map(async (status) => ({
-      ...status,
-      media: await getMediaUrl(status.media),
-    })),
-  );
-
-  return signedStatuses;
+      setState((s) => { s.statuses = signedStatuses; });
+      return signedStatuses;
+    }
+  } catch (err) {
+    console.warn("Unable to fetch active statuses online, returning cached statuses:", err);
+  }
+  return getState().statuses.filter((s) => !isExpired(s));
 }
 
 export async function createStatus(input: {

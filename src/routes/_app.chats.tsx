@@ -173,33 +173,15 @@ function ChatsPage() {
                   onClick={async () => {
                     setLoadingUserId(u.id);
                     try {
-                      // Create optimistic local chat and navigate immediately
-                      const optimisticChat: Chat = {
-                        id: `temp-${Date.now()}`,
-                        type: "dm" as const,
-                        memberIds: [me.id, u.id],
-                        createdAt: Date.now(),
-                      };
+                      const c = await getOrCreateDM(me.id, u.id);
                       setNewChatOpen(false);
-                      nav({ to: "/chats/$chatId", params: { chatId: optimisticChat.id } });
-                      setLoadingUserId(null);
-
-                      // Sync with backend in background, replace temp chat ID if created
-                      try {
-                        const c = await getOrCreateDM(me.id, u.id);
-                        if (optimisticChat.id !== c.id) {
-                          // Chat was created on backend, navigate to real ID
-                          nav({ to: "/chats/$chatId", params: { chatId: c.id }, replace: true });
-                        }
-                      } catch (syncError) {
-                        console.warn("Background sync error:", syncError);
-                        // Chat view will still show the temp chat
-                      }
+                      nav({ to: "/chats/$chatId", params: { chatId: c.id } });
                     } catch (error) {
-                      setLoadingUserId(null);
                       const message = error instanceof Error ? error.message : "Failed to start chat";
                       console.error("Unable to start chat:", error);
                       toast.error(message);
+                    } finally {
+                      setLoadingUserId(null);
                     }
                   }}
                   className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"

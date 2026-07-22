@@ -1,6 +1,6 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
-import type { Chat } from "@/lib/mockStore";
+import { getState, setState, type Chat } from "@/lib/mockStore";
 
 function mapChat(chat: any, members: string[], group: any | null): Chat {
   const base: Chat = {
@@ -55,42 +55,37 @@ export async function listChats(userId: string): Promise<Chat[]> {
       .from("chat_members")
       .select("chat_id")
       .eq("user_id", userId);
-    if (membershipError) {
-      console.warn("Unable to load chats:", membershipError);
-      return [];
+    if (!membershipError && membershipRows) {
+      const chatIds = membershipRows.map((row) => row.chat_id);
+      if (chatIds.length) {
+        const { data: chats, error: chatError } = await supabase
+          .from("chats")
+          .select("*")
+          .in("id", chatIds)
+          .order("updated_at", { ascending: false });
+
+        if (!chatError && chats) {
+          const memberRows = await fetchChatMembers(chatIds);
+          const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
+          const groups = groupsData.data ?? [];
+
+          const remoteChats = chats.map((chatRow) => {
+            const members = memberRows
+              .filter((row) => row.chat_id === chatRow.id)
+              .map((row) => row.user_id);
+            const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
+            return mapChat(chatRow, members, group);
+          });
+
+          setState((s) => { s.chats = remoteChats; });
+          return remoteChats;
+        }
+      }
     }
-
-    const chatIds = (membershipRows ?? []).map((row) => row.chat_id);
-    if (!chatIds.length) return [];
-
-    const { data: chats, error: chatError } = await supabase
-      .from("chats")
-      .select("*")
-      .in("id", chatIds)
-      .order("updated_at", { ascending: false });
-    if (chatError) {
-      console.warn("Unable to load chats:", chatError);
-      return [];
-    }
-
-    const memberRows = await fetchChatMembers(chatIds);
-    const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
-    if (groupsData.error) {
-      console.warn("Unable to load chat groups:", groupsData.error);
-    }
-    const groups = groupsData.data ?? [];
-
-    return (chats ?? []).map((chatRow) => {
-      const members = memberRows
-        .filter((row) => row.chat_id === chatRow.id)
-        .map((row) => row.user_id);
-      const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
-      return mapChat(chatRow, members, group);
-    });
   } catch (error) {
-    console.warn("Unable to load chats:", error);
-    return [];
+    console.warn("Unable to load remote chats, returning cached chats:", error);
   }
+  return getState().chats;
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
@@ -101,37 +96,34 @@ export async function getChat(id: string): Promise<Chat | undefined> {
       .select("*")
       .eq("id", id)
       .single();
-    if (chatError || !chatRow) return undefined;
+    if (!chatError && chatRow) {
+      const { data: memberRows } = await supabase
+        .from("chat_members")
+        .select("user_id")
+        .eq("chat_id", id);
+      const members = (memberRows ?? []).map((row) => row.user_id);
 
-    const { data: memberRows, error: memberError } = await supabase
-      .from("chat_members")
-      .select("user_id")
-      .eq("chat_id", id);
-    if (memberError) {
-      console.warn("Unable to load chat members:", memberError);
-      return mapChat(chatRow, [], null);
-    }
-
-    const members = (memberRows ?? []).map((row) => row.user_id);
-
-    let group = null;
-    if (chatRow.type === "group") {
-      const { data: groupRow, error: groupError } = await supabase
-        .from("groups")
-        .select("*")
-        .eq("chat_id", id)
-        .single();
-      if (groupError && groupError.code !== "PGRST116") {
-        console.warn("Unable to load chat group metadata:", groupError);
+      let group = null;
+      if (chatRow.type === "group") {
+        const { data: groupRow } = await supabase
+          .from("groups")
+          .select("*")
+          .eq("chat_id", id)
+          .single();
+        group = groupRow ?? null;
       }
-      group = groupRow ?? null;
+      const remoteChat = mapChat(chatRow, members, group);
+      setState((s) => {
+        const idx = s.chats.findIndex((c) => c.id === id);
+        if (idx >= 0) s.chats[idx] = remoteChat;
+        else s.chats.push(remoteChat);
+      });
+      return remoteChat;
     }
-
-    return mapChat(chatRow, members, group);
   } catch (error) {
-    console.warn("Unable to load chat:", error);
-    return undefined;
+    console.warn("Unable to load remote chat, returning cached chat:", error);
   }
+  return getState().chats.find((c) => c.id === id);
 }
 
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {
