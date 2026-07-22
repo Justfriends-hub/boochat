@@ -161,10 +161,16 @@ export async function signInWithOAuth(provider: "google" | "apple") {
 }
 
 export async function signOut() {
-  const supabase = ensureSupabase();
-  await supabase.auth.signOut();
-  cachedUser = null;
-  publishAuthChange();
+  try {
+    if (supabaseConfigured && supabase) {
+      await supabase.auth.signOut();
+    }
+  } catch (error) {
+    console.warn("Supabase sign-out warning:", error);
+  } finally {
+    cachedUser = null;
+    publishAuthChange();
+  }
 }
 
 export function getCurrentUser(): User | null {

@@ -302,3 +302,121 @@ If the app still shows errors, the error message will now include which table's 
 
 - Supabase RLS Docs: https://supabase.com/docs/guides/auth/row-level-security
 - Supabase SQL Examples: https://supabase.com/docs/guides/auth/row-level-security/examples
+
+## Fastest fix for the current error
+
+If you are seeing `new row violates rls policy` when creating a chat, run this SQL in the Supabase SQL Editor first. It enables RLS and creates the minimum policies needed for the app to create direct messages and groups.
+
+```sql
+-- Enable RLS on the tables used by the app
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chat_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_posts ENABLE ROW LEVEL SECURITY;
+
+-- Profiles
+DROP POLICY IF EXISTS "profiles_select_authenticated" ON public.profiles;
+CREATE POLICY "profiles_select_authenticated" ON public.profiles
+  FOR SELECT TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "profiles_update_self" ON public.profiles;
+CREATE POLICY "profiles_update_self" ON public.profiles
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+
+-- Chats
+DROP POLICY IF EXISTS "chats_insert_authenticated" ON public.chats;
+CREATE POLICY "chats_insert_authenticated" ON public.chats
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "chats_select_members" ON public.chats;
+CREATE POLICY "chats_select_members" ON public.chats
+  FOR SELECT TO authenticated
+  USING (
+    id IN (
+      SELECT chat_id FROM public.chat_members WHERE user_id = auth.uid()
+    )
+  );
+
+-- Chat members
+DROP POLICY IF EXISTS "chat_members_insert_authenticated" ON public.chat_members;
+CREATE POLICY "chat_members_insert_authenticated" ON public.chat_members
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "chat_members_select_members" ON public.chat_members;
+CREATE POLICY "chat_members_select_members" ON public.chat_members
+  FOR SELECT TO authenticated
+  USING (
+    chat_id IN (
+      SELECT chat_id FROM public.chat_members WHERE user_id = auth.uid()
+    )
+  );
+
+-- Messages
+DROP POLICY IF EXISTS "messages_insert_authenticated" ON public.messages;
+CREATE POLICY "messages_insert_authenticated" ON public.messages
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() IS NOT NULL AND
+    chat_id IN (
+      SELECT chat_id FROM public.chat_members WHERE user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "messages_select_members" ON public.messages;
+CREATE POLICY "messages_select_members" ON public.messages
+  FOR SELECT TO authenticated
+  USING (
+    chat_id IN (
+      SELECT chat_id FROM public.chat_members WHERE user_id = auth.uid()
+    )
+  );
+
+-- Groups
+DROP POLICY IF EXISTS "groups_insert_authenticated" ON public.groups;
+CREATE POLICY "groups_insert_authenticated" ON public.groups
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "groups_select_members" ON public.groups;
+CREATE POLICY "groups_select_members" ON public.groups
+  FOR SELECT TO authenticated
+  USING (
+    chat_id IN (
+      SELECT chat_id FROM public.chat_members WHERE user_id = auth.uid()
+    )
+  );
+
+-- Channels
+DROP POLICY IF EXISTS "channels_select_authenticated" ON public.channels;
+CREATE POLICY "channels_select_authenticated" ON public.channels
+  FOR SELECT TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "channels_insert_authenticated" ON public.channels;
+CREATE POLICY "channels_insert_authenticated" ON public.channels
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+-- Channel posts
+DROP POLICY IF EXISTS "channel_posts_select_authenticated" ON public.channel_posts;
+CREATE POLICY "channel_posts_select_authenticated" ON public.channel_posts
+  FOR SELECT TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "channel_posts_insert_authenticated" ON public.channel_posts;
+CREATE POLICY "channel_posts_insert_authenticated" ON public.channel_posts
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+```
+
+After you run that, sign out and sign back in once, then try creating a chat again.
+
+---
