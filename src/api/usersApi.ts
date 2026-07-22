@@ -6,6 +6,7 @@ function mapProfile(profile: any): User {
   return {
     id: profile.id,
     email: profile.email,
+    password: "",
     displayName: profile.display_name || profile.email.split("@")[0],
     avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`,
     role: "user",

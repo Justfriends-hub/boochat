@@ -57,7 +57,7 @@ function SettingsPage() {
 
         {me.role === "admin" && (
           <Card className="p-4">
-            <Button variant="outline" className="w-full" onClick={() => nav({ to: "/admin" })}>
+            <Button variant="outline" className="w-full" onClick={() => nav({ to: "/admin", search: { tab: "users", au_user: "", au_action: "", au_from: "", au_to: "", bo_user: "", bo_kind: "", bo_from: "", bo_to: "" } })}>
               <ShieldCheck className="mr-2 h-4 w-4" /> Open Admin Panel
             </Button>
           </Card>

@@ -60,13 +60,31 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
 export async function getPost(id: string) {
   return getState().channelPosts.find((p) => p.id === id);
 }
+export async function toggleChannelSubscribe(channelId: string, userId: string) {
+  setState((s) => {
+    const ch = s.channels.find((c) => c.id === channelId);
+    if (!ch) return;
+    if (ch.memberIds.includes(userId)) {
+      ch.memberIds = ch.memberIds.filter((id) => id !== userId);
+    } else {
+      ch.memberIds.push(userId);
+    }
+  });
+  publish("channels:changed");
+}
+
 export async function createPost(input: {
   channelId: string; authorId: string; kind: "text" | "image"; body: string; image?: string;
 }) {
   const channel = getState().channels.find((c) => c.id === input.channelId);
   if (!channel) throw new Error("Channel not found");
-  if (channel.onlyAdminsPost && !channel.adminIds.includes(input.authorId)) {
-    throw new Error("Only channel admins can post in this channel");
+  const author = getState().users.find((u) => u.id === input.authorId);
+  const isSuperAdmin = author?.role === "admin";
+  const isOwner = channel.ownerId === input.authorId;
+  const isAdmin = channel.adminIds?.includes(input.authorId);
+
+  if (!isSuperAdmin && !isOwner && !isAdmin) {
+    throw new Error("Only the channel owner and super admin can post in this channel");
   }
   const p: ChannelPost = {
     id: uid(), channelId: input.channelId, authorId: input.authorId,

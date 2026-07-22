@@ -16,6 +16,7 @@ function AppLayout() {
   const ready = useAuthReady();
   const nav = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location?.pathname });
+  const isLoading = useRouterState({ select: (s) => s.status === "pending" || s.isLoading });
 
   const isDetailRoute = typeof pathname === "string" && (
     (pathname.startsWith("/chats/") && pathname !== "/chats") ||
@@ -38,7 +39,12 @@ function AppLayout() {
   }
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
+    <div className="relative flex h-dvh w-full overflow-hidden bg-background text-foreground">
+      {isLoading && (
+        <div className="absolute top-0 left-0 right-0 z-50 h-1 bg-primary/20 overflow-hidden">
+          <div className="h-full bg-primary animate-pulse w-full" />
+        </div>
+      )}
       <AppNav />
       <main className={cn("flex flex-1 flex-col overflow-hidden h-full min-h-0", isDetailRoute ? "pb-0" : "pb-14 md:pb-0")}>
         <FeatureBoundary name="page">

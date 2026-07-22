@@ -97,7 +97,9 @@ export function seed(s: Store) {
       id, name: c.name, description: c.desc,
       avatar: `https://api.dicebear.com/7.x/shapes/svg?seed=${c.name}`,
       ownerId: admin.id,
+      adminIds: [admin.id],
       memberIds: s.users.map((u) => u.id),
+      onlyAdminsPost: true,
       createdAt: now - (i + 1) * 86400_000,
     });
     for (let p = 0; p < 3; p++) {

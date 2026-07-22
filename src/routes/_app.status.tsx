@@ -14,6 +14,7 @@ import { listUsers } from "@/api/usersApi";
 import { getState } from "@/lib/mockStore";
 import { useAuth } from "@/hooks/useAuth";
 import { timeAgo } from "@/lib/format";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/status")({
   component: StatusPage,
@@ -56,14 +57,20 @@ function StatusPage() {
 
   const upload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (!f) return;
+    if (!f || !me) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      createStatus({
-        userId: me.id,
-        kind: f.type.startsWith("video/") ? "video" : "image",
-        media: String(reader.result),
-      });
+    reader.onload = async () => {
+      try {
+        await createStatus({
+          userId: me.id,
+          kind: f.type.startsWith("video/") ? "video" : "image",
+          media: String(reader.result),
+        });
+        qc.invalidateQueries({ queryKey: ["statuses"] });
+        toast.success("Status update added!");
+      } catch (err: any) {
+        toast.error(err.message || "Failed to upload status");
+      }
     };
     reader.readAsDataURL(f);
     e.target.value = "";

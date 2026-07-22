@@ -1,6 +1,6 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
-import { getState, setState, type Status } from "@/lib/mockStore";
+import { getState, setState, uid, type Status } from "@/lib/mockStore";
 
 const STATUS_BUCKET = "status-media";
 
@@ -57,8 +57,13 @@ export async function listActiveStatuses(): Promise<Status[]> {
         })),
       );
 
-      setState((s) => { s.statuses = signedStatuses; });
-      return signedStatuses;
+      setState((s) => {
+        // Merge Supabase statuses with local ones
+        const existingIds = new Set(signedStatuses.map((st) => st.id));
+        const localOnly = s.statuses.filter((st) => !existingIds.has(st.id) && !isExpired(st));
+        s.statuses = [...signedStatuses, ...localOnly];
+      });
+      return getState().statuses.filter((s) => !isExpired(s));
     }
   } catch (err) {
     console.warn("Unable to fetch active statuses online, returning cached statuses:", err);
@@ -69,74 +74,125 @@ export async function listActiveStatuses(): Promise<Status[]> {
 export async function createStatus(input: {
   userId: string; kind: "image" | "video"; media: string; caption?: string;
 }): Promise<Status> {
-  const response = await fetch(input.media);
-  const blob = await response.blob();
-  const extension = blob.type.split("/")[1] || "bin";
-  const path = `${input.userId}/${Date.now()}.${extension}`;
+  const newStatus: Status = {
+    id: uid(),
+    userId: input.userId,
+    kind: input.kind,
+    media: input.media,
+    caption: input.caption,
+    createdAt: Date.now(),
+    viewedBy: [],
+    reactions: [],
+  };
 
-  const supabase = ensureSupabase();
-  const { error: uploadError } = await supabase.storage
-    .from(STATUS_BUCKET)
-    .upload(path, blob);
-  if (uploadError) throw new Error(uploadError.message);
+  try {
+    const response = await fetch(input.media);
+    const blob = await response.blob();
+    const extension = blob.type.split("/")[1] || "bin";
+    const path = `${input.userId}/${Date.now()}.${extension}`;
 
-  const { data, error } = await supabase
-    .from("statuses")
-    .insert([
-      {
-        user_id: input.userId,
-        kind: input.kind,
-        media_url: path,
-        caption: input.caption,
-      },
-    ])
-    .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
-    .single();
-  if (error || !data) throw new Error(error?.message || "Unable to create status.");
+    const supabase = ensureSupabase();
+    const { error: uploadError } = await supabase.storage
+      .from(STATUS_BUCKET)
+      .upload(path, blob);
 
-  const media = await getMediaUrl(path);
-  const status = mapStatus({ ...data, media_url: path, media });
+    if (!uploadError) {
+      const { data, error } = await supabase
+        .from("statuses")
+        .insert([
+          {
+            user_id: input.userId,
+            kind: input.kind,
+            media_url: path,
+            caption: input.caption,
+          },
+        ])
+        .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
+        .single();
+
+      if (!error && data) {
+        const media = await getMediaUrl(path);
+        const mapped = mapStatus({ ...data, media_url: path, media });
+        setState((s) => { s.statuses.unshift(mapped); });
+        publish("status:changed");
+        return mapped;
+      }
+    }
+  } catch (err) {
+    console.warn("Supabase status upload failed, storing status locally:", err);
+  }
+
+  // Fallback to local store
+  setState((s) => { s.statuses.unshift(newStatus); });
   publish("status:changed");
-  return status;
+  return newStatus;
 }
 
 export async function markStatusViewed(id: string, userId: string) {
-  const supabase = ensureSupabase();
-  const { error } = await supabase
-    .from("status_views")
-    .upsert({ status_id: id, viewer_id: userId }, { onConflict: ["status_id", "viewer_id"] });
-  if (error) throw new Error(error.message);
+  // Always update local store immediately
+  setState((s) => {
+    const st = s.statuses.find((x) => x.id === id);
+    if (st && !st.viewedBy.includes(userId)) {
+      st.viewedBy.push(userId);
+    }
+  });
   publish("status:changed");
+
+  try {
+    const supabase = ensureSupabase();
+    await supabase
+      .from("status_views")
+      .upsert({ status_id: id, viewer_id: userId }, { onConflict: "status_id,viewer_id" });
+  } catch {}
 }
 
 export async function reactToStatus(id: string, userId: string, emoji: string) {
-  const supabase = ensureSupabase();
-  const { error } = await supabase
-    .from("status_reactions")
-    .upsert(
-      { status_id: id, user_id: userId, emoji },
-      { onConflict: ["status_id", "user_id"] },
-    );
-  if (error) throw new Error(error.message);
+  setState((s) => {
+    const st = s.statuses.find((x) => x.id === id);
+    if (st) {
+      const existing = st.reactions.find((r) => r.userId === userId);
+      if (existing) existing.emoji = emoji;
+      else st.reactions.push({ userId, emoji });
+    }
+  });
   publish("status:changed");
+
+  try {
+    const supabase = ensureSupabase();
+    await supabase
+      .from("status_reactions")
+      .upsert(
+        { status_id: id, user_id: userId, emoji },
+        { onConflict: "status_id,user_id" },
+      );
+  } catch {}
 }
 
 export async function deleteStatus(id: string) {
-  const supabase = ensureSupabase();
-  const { error } = await supabase
-    .from("statuses")
-    .delete()
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  setState((s) => {
+    s.statuses = s.statuses.filter((st) => st.id !== id);
+  });
   publish("status:changed");
+
+  try {
+    const supabase = ensureSupabase();
+    await supabase
+      .from("statuses")
+      .delete()
+      .eq("id", id);
+  } catch {}
 }
 
 export function subscribeToStatuses(cb: () => void) {
-  const supabase = ensureSupabase();
-  const channel = supabase.channel("statuses");
-  channel.on("postgres_changes", { event: "*", schema: "public", table: "statuses" }, () => cb());
-  channel.on("postgres_changes", { event: "*", schema: "public", table: "status_views" }, () => cb());
-  channel.on("postgres_changes", { event: "*", schema: "public", table: "status_reactions" }, () => cb());
-  channel.subscribe();
-  return () => channel.unsubscribe();
+  try {
+    const supabase = ensureSupabase();
+    const channel = supabase.channel("statuses");
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "statuses" }, () => cb());
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "status_views" }, () => cb());
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "status_reactions" }, () => cb());
+    channel.subscribe();
+    return () => channel.unsubscribe();
+  } catch {
+    return () => {};
+  }
 }

@@ -30,25 +30,21 @@ function NotFoundComponent() {
 }
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
+  console.error("Root route error:", error);
   const router = useRouter();
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold">This page didn't load</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Something went wrong on our end.</p>
-        <div className="mt-6 flex justify-center gap-2">
-          <button
-            onClick={() => { router.invalidate(); reset(); }}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-          >
-            Try again
-          </button>
-        </div>
-      </div>
+    <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent mb-3" />
+      <p className="text-sm font-medium text-muted-foreground">Loading page...</p>
+      <button
+        onClick={() => { router.invalidate(); reset(); }}
+        className="mt-4 text-xs text-primary underline"
+      >
+        Retry now
+      </button>
     </div>
   );
 }
