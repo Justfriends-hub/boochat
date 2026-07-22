@@ -1,4 +1,4 @@
-import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
+import { ensureSupabase, supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { publish, subscribe } from "@/lib/eventBus";
 import type { User } from "@/lib/mockStore";
 
@@ -16,6 +16,7 @@ function toUser(profile: any, roles: Array<{ role: string }> | null = null): Use
     online: profile.online ?? false,
     banned: profile.banned ?? false,
     bio: profile.bio ?? undefined,
+    password: profile.password ?? "",
   };
 }
 
@@ -39,60 +40,73 @@ export async function initializeAuth() {
       return;
     }
 
-    const supabase = ensureSupabase();
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (sessionData.session?.user?.id) {
-      await refreshCurrentUser(sessionData.session.user.id);
-    } else {
+    try {
+      const client = ensureSupabase();
+      const { data: sessionData } = await client.auth.getSession();
+      if (sessionData.session?.user?.id) {
+        await refreshCurrentUser(sessionData.session.user.id);
+      } else {
+        cachedUser = null;
+        authReady = true;
+        publishAuthChange();
+      }
+
+      client.auth.onAuthStateChange(async (_event, session) => {
+        if (session?.user?.id) {
+          await refreshCurrentUser(session.user.id);
+        } else {
+          cachedUser = null;
+          publishAuthChange();
+        }
+      });
+    } catch (error) {
+      console.warn("Unable to initialize auth:", error);
       cachedUser = null;
       authReady = true;
       publishAuthChange();
     }
-
-    supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user?.id) {
-        await refreshCurrentUser(session.user.id);
-      } else {
-        cachedUser = null;
-        publishAuthChange();
-      }
-    });
   })();
   return initializePromise;
 }
 
 async function refreshCurrentUser(userId: string) {
-  const supabase = ensureSupabase();
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("id,email,display_name,avatar_url,bio,online,banned")
-    .eq("id", userId)
-    .single();
+  try {
+    const client = ensureSupabase();
+    const { data: profile, error: profileError } = await client
+      .from("profiles")
+      .select("id,email,display_name,avatar_url,bio,online,banned")
+      .eq("id", userId)
+      .single();
 
-  if (profileError || !profile) {
+    if (profileError || !profile) {
+      cachedUser = null;
+      publishAuthChange();
+      return;
+    }
+
+    const { data: roles, error: rolesError } = await client
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+
+    if (rolesError) {
+      cachedUser = null;
+      publishAuthChange();
+      return;
+    }
+
+    cachedUser = toUser(profile, roles);
+    publishAuthChange();
+  } catch (error) {
+    console.warn("Unable to refresh current user:", error);
     cachedUser = null;
     publishAuthChange();
-    return;
   }
-
-  const { data: roles, error: rolesError } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId);
-
-  if (rolesError) {
-    cachedUser = null;
-    publishAuthChange();
-    return;
-  }
-
-  cachedUser = toUser(profile, roles);
-  publishAuthChange();
 }
 
 export async function signIn(email: string, password: string): Promise<User> {
-  const supabase = ensureSupabase();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const client = ensureSupabase();
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error || !data.session) {
     console.error("Supabase sign-in error:", error);
     throw new Error(error?.message || JSON.stringify(error) || "Unable to sign in.");
@@ -108,8 +122,8 @@ export async function signUp(input: {
   password: string;
   displayName: string;
 }): Promise<User> {
-  const supabase = ensureSupabase();
-  const { data, error } = await supabase.auth.signUp({
+  const client = ensureSupabase();
+  const { data, error } = await client.auth.signUp({
     email: input.email,
     password: input.password,
     options: {
@@ -139,13 +153,14 @@ export async function signUp(input: {
     avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(input.email)}`,
     role: "user",
     online: false,
+    password: "",
   };
 }
 
 export async function signInWithOAuth(provider: "google" | "apple") {
-  const supabase = ensureSupabase();
+  const client = ensureSupabase();
   const redirectTo = `${window.location.origin}/chats`;
-  const { data, error } = await supabase.auth.signInWithOAuth({
+  const { data, error } = await client.auth.signInWithOAuth({
     provider,
     options: {
       redirectTo,
@@ -169,6 +184,7 @@ export async function signOut() {
     console.warn("Supabase sign-out warning:", error);
   } finally {
     cachedUser = null;
+    authReady = true;
     publishAuthChange();
   }
 }

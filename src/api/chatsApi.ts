@@ -30,77 +30,108 @@ function handleSupabaseError(error: any, context: string): Error {
 }
 
 async function fetchChatMembers(chatIds: string[]) {
-  const supabase = ensureSupabase();
-  const { data, error } = await supabase
-    .from("chat_members")
-    .select("chat_id,user_id")
-    .in("chat_id", chatIds);
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("chat_members")
+      .select("chat_id,user_id")
+      .in("chat_id", chatIds);
 
-  if (error) throw new Error(error.message);
-  return data ?? [];
+    if (error) {
+      console.warn("Unable to fetch chat members:", error);
+      return [];
+    }
+    return data ?? [];
+  } catch (error) {
+    console.warn("Unable to fetch chat members:", error);
+    return [];
+  }
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
-  const supabase = ensureSupabase();
-  const { data: membershipRows, error: membershipError } = await supabase
-    .from("chat_members")
-    .select("chat_id")
-    .eq("user_id", userId);
-  if (membershipError) throw new Error(membershipError.message);
+  try {
+    const supabase = ensureSupabase();
+    const { data: membershipRows, error: membershipError } = await supabase
+      .from("chat_members")
+      .select("chat_id")
+      .eq("user_id", userId);
+    if (membershipError) {
+      console.warn("Unable to load chats:", membershipError);
+      return [];
+    }
 
-  const chatIds = (membershipRows ?? []).map((row) => row.chat_id);
-  if (!chatIds.length) return [];
+    const chatIds = (membershipRows ?? []).map((row) => row.chat_id);
+    if (!chatIds.length) return [];
 
-  const { data: chats, error: chatError } = await supabase
-    .from("chats")
-    .select("*")
-    .in("id", chatIds)
-    .order("updated_at", { ascending: false });
-  if (chatError) throw new Error(chatError.message);
+    const { data: chats, error: chatError } = await supabase
+      .from("chats")
+      .select("*")
+      .in("id", chatIds)
+      .order("updated_at", { ascending: false });
+    if (chatError) {
+      console.warn("Unable to load chats:", chatError);
+      return [];
+    }
 
-  const memberRows = await fetchChatMembers(chatIds);
-  const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
-  if (groupsData.error) throw new Error(groupsData.error.message);
-  const groups = groupsData.data ?? [];
+    const memberRows = await fetchChatMembers(chatIds);
+    const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
+    if (groupsData.error) {
+      console.warn("Unable to load chat groups:", groupsData.error);
+    }
+    const groups = groupsData.data ?? [];
 
-  return (chats ?? []).map((chatRow) => {
-    const members = memberRows
-      .filter((row) => row.chat_id === chatRow.id)
-      .map((row) => row.user_id);
-    const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
-    return mapChat(chatRow, members, group);
-  });
+    return (chats ?? []).map((chatRow) => {
+      const members = memberRows
+        .filter((row) => row.chat_id === chatRow.id)
+        .map((row) => row.user_id);
+      const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
+      return mapChat(chatRow, members, group);
+    });
+  } catch (error) {
+    console.warn("Unable to load chats:", error);
+    return [];
+  }
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
-  const supabase = ensureSupabase();
-  const { data: chatRow, error: chatError } = await supabase
-    .from("chats")
-    .select("*")
-    .eq("id", id)
-    .single();
-  if (chatError || !chatRow) return undefined;
-
-  const { data: memberRows, error: memberError } = await supabase
-    .from("chat_members")
-    .select("user_id")
-    .eq("chat_id", id);
-  if (memberError) throw new Error(memberError.message);
-
-  const members = (memberRows ?? []).map((row) => row.user_id);
-
-  let group = null;
-  if (chatRow.type === "group") {
-    const { data: groupRow, error: groupError } = await supabase
-      .from("groups")
+  try {
+    const supabase = ensureSupabase();
+    const { data: chatRow, error: chatError } = await supabase
+      .from("chats")
       .select("*")
-      .eq("chat_id", id)
+      .eq("id", id)
       .single();
-    if (groupError && groupError.code !== "PGRST116") throw new Error(groupError.message);
-    group = groupRow ?? null;
-  }
+    if (chatError || !chatRow) return undefined;
 
-  return mapChat(chatRow, members, group);
+    const { data: memberRows, error: memberError } = await supabase
+      .from("chat_members")
+      .select("user_id")
+      .eq("chat_id", id);
+    if (memberError) {
+      console.warn("Unable to load chat members:", memberError);
+      return mapChat(chatRow, [], null);
+    }
+
+    const members = (memberRows ?? []).map((row) => row.user_id);
+
+    let group = null;
+    if (chatRow.type === "group") {
+      const { data: groupRow, error: groupError } = await supabase
+        .from("groups")
+        .select("*")
+        .eq("chat_id", id)
+        .single();
+      if (groupError && groupError.code !== "PGRST116") {
+        console.warn("Unable to load chat group metadata:", groupError);
+      }
+      group = groupRow ?? null;
+    }
+
+    return mapChat(chatRow, members, group);
+  } catch (error) {
+    console.warn("Unable to load chat:", error);
+    return undefined;
+  }
 }
 
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {
@@ -262,13 +293,18 @@ export async function leaveGroup(chatId: string, userId: string) {
 }
 
 export function subscribeToChats(cb: () => void) {
-  const supabase = ensureSupabase();
-  const channel = supabase.channel("chats");
-  channel.on("postgres_changes", { event: "*", schema: "public", table: "chats" }, () => cb());
-  channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, () => cb());
-  channel.subscribe();
+  try {
+    const supabase = ensureSupabase();
+    const channel = supabase.channel("chats");
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "chats" }, () => cb());
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, () => cb());
+    channel.subscribe();
 
-  return () => {
-    channel.unsubscribe();
-  };
+    return () => {
+      channel.unsubscribe();
+    };
+  } catch (error) {
+    console.warn("Unable to subscribe to chat updates:", error);
+    return () => undefined;
+  }
 }
