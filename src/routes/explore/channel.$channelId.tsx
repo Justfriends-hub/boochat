@@ -9,39 +9,40 @@ export const Route = createFileRoute("/explore/channel/$channelId")({
   loader: async ({ params }) => {
     try {
       const channel = await getChannel(params.channelId);
+      if (!channel) {
+        return { channel: null, error: "Channel not found" };
+      }
       return { channel, error: null };
     } catch (error) {
-      return { channel: null, error: (error as Error).message };
+      const message = error instanceof Error ? error.message : "Failed to load channel";
+      return { channel: null, error: message };
     }
   },
   component: ChannelPreview,
-  errorComponent: ChannelPreviewError,
 });
-
-function ChannelPreviewError({ error }: { error: Error }) {
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
-      <div className="max-w-md text-center">
-        <h1 className="text-2xl font-bold">Unable to load channel</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
-        <a href="/" className="mt-6 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-          Go home
-        </a>
-      </div>
-    </div>
-  );
-}
 
 function ChannelPreview() {
   const { channelId } = Route.useParams();
   const me = useAuth();
-  const loaderData = Route.useLoaderData();
+  const loaderData = Route.useLoaderData() as { channel: any; error: string | null };
   
-  const channel = loaderData?.channel;
-  const error = loaderData?.error;
+  const channel = loaderData.channel;
+  const error = loaderData.error;
 
   if (error || !channel) {
-    return <EmptyState title="Channel not found" description="This channel link is invalid or the channel no longer exists." />;
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
+        <div className="max-w-md text-center">
+          <h1 className="text-2xl font-bold">Channel not found</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {error || "This channel link is invalid or the channel no longer exists."}
+          </p>
+          <a href="/" className="mt-6 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+            Go home
+          </a>
+        </div>
+      </div>
+    );
   }
 
   return (

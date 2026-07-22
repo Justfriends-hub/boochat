@@ -9,39 +9,40 @@ export const Route = createFileRoute("/explore/group/$groupId")({
   loader: async ({ params }) => {
     try {
       const chat = await getChat(params.groupId);
+      if (!chat || chat.type !== "group") {
+        return { chat: null, error: "Group not found" };
+      }
       return { chat, error: null };
     } catch (error) {
-      return { chat: null, error: (error as Error).message };
+      const message = error instanceof Error ? error.message : "Failed to load group";
+      return { chat: null, error: message };
     }
   },
   component: GroupPreview,
-  errorComponent: GroupPreviewError,
 });
-
-function GroupPreviewError({ error }: { error: Error }) {
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
-      <div className="max-w-md text-center">
-        <h1 className="text-2xl font-bold">Unable to load group</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
-        <a href="/" className="mt-6 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-          Go home
-        </a>
-      </div>
-    </div>
-  );
-}
 
 function GroupPreview() {
   const { groupId } = Route.useParams();
   const me = useAuth();
-  const loaderData = Route.useLoaderData();
+  const loaderData = Route.useLoaderData() as { chat: any; error: string | null };
   
-  const chat = loaderData?.chat;
-  const error = loaderData?.error;
+  const chat = loaderData.chat;
+  const error = loaderData.error;
 
   if (error || !chat || chat.type !== "group") {
-    return <EmptyState title="Group not found" description="This group link is invalid or the group no longer exists." />;
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
+        <div className="max-w-md text-center">
+          <h1 className="text-2xl font-bold">Group not found</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {error || "This group link is invalid or the group no longer exists."}
+          </p>
+          <a href="/" className="mt-6 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+            Go home
+          </a>
+        </div>
+      </div>
+    );
   }
 
   return (
