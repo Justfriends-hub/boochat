@@ -122,6 +122,10 @@ export function Composer({
                 ref={textareaRef}
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
+                onFocus={() => {
+                  window.scrollTo(0, 0);
+                  if (document.body) document.body.scrollTop = 0;
+                }}
                 placeholder={placeholder}
                 aria-label="Message"
                 disabled={disabled}

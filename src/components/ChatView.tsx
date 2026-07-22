@@ -125,9 +125,9 @@ export function ChatView({ chatId }: { chatId: string }) {
   }
 
   return (
-    <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden select-none">
-      {/* Header - Stiff fixed at top, never moves or collapses */}
-      <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b bg-card px-3 shadow-xs">
+    <div className="relative flex flex-1 flex-col h-full min-h-0 overflow-hidden select-none">
+      {/* Header - Permanently stiff & fixed at top with backdrop blur so scrolling messages pass under it */}
+      <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-card/95 backdrop-blur-md px-3 shadow-xs">
         <Button variant="ghost" size="icon" onClick={() => router.history.back()} className="md:hidden">
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -147,12 +147,13 @@ export function ChatView({ chatId }: { chatId: string }) {
         <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5" /></Button>
       </header>
       {showSearch && (
-        <div className="sticky top-16 z-10 shrink-0 border-b bg-card p-2">
+        <div className="sticky top-16 z-20 shrink-0 border-b bg-card/95 backdrop-blur-md p-2">
           <Input
             autoFocus
             placeholder="Search in conversation"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onFocus={() => window.scrollTo(0, 0)}
             className="text-base md:text-sm"
           />
         </div>
