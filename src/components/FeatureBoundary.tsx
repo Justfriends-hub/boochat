@@ -7,8 +7,34 @@ type State = { error: Error | null };
 
 export class FeatureBoundary extends Component<Props, State> {
   state: State = { error: null };
-  static getDerivedStateFromError(error: Error) { return { error }; }
-  componentDidCatch(error: Error) { console.error(`[${this.props.name}]`, error); }
+  retryCount = 0;
+  isRetrying = false;
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(`[${this.props.name}]`, error);
+  }
+
+  componentDidUpdate(prevProps: Props, prevState: State) {
+    if (this.state.error && !prevState.error) {
+      this.retryCount = 0;
+      this.scheduleRetry();
+    }
+  }
+
+  scheduleRetry() {
+    if (this.retryCount >= 3) return;
+    this.retryCount++;
+    this.isRetrying = true;
+    setTimeout(() => {
+      this.setState({ error: null });
+      this.isRetrying = false;
+    }, 2000);
+  }
+
   render() {
     if (this.state.error) {
       return (
@@ -17,10 +43,22 @@ export class FeatureBoundary extends Component<Props, State> {
           <p className="text-sm text-muted-foreground">
             The {this.props.name} section hit a snag.
           </p>
-          <Button size="sm" onClick={() => this.setState({ error: null })}>Retry</Button>
+          {this.isRetrying ? (
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-4 border-2 border-primary rounded-full animate-spin border-t-transparent" />
+              <span className="text-xs text-muted-foreground">
+                Retrying... ({this.retryCount} of 3)
+              </span>
+            </div>
+          ) : (
+            <Button size="sm" onClick={() => this.setState({ error: null })}>
+              Retry
+            </Button>
+          )}
         </div>
       );
     }
     return this.props.children;
   }
 }
+

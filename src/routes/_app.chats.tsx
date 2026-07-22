@@ -143,7 +143,7 @@ function ChatsPage() {
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <p className="truncate text-sm text-muted-foreground">
-                          {r.last?.kind === "image" ? "📷 Photo" : r.last?.kind === "voice" ? "🎤 Voice message" : (r.last?.body || "No messages yet")}
+                          {r.last?.kind === "image" ? "📷 Photo" : r.last?.kind === "voice" ? "🎤 Voice message" : (r.last?.body ?? "")}
                         </p>
                         {r.unread > 0 && (
                           <span className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">
