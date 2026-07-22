@@ -30,9 +30,13 @@ function SignupPage() {
     if (password !== confirm) return toast.error("Passwords don't match");
     setBusy(true);
     try {
-      await signUp({ email, password, displayName });
-      toast.success("Account created!");
-      nav({ to: "/chats" });
+      const user = await signUp({ email, password, displayName });
+      if (!user.id) {
+        toast.success("Account created. Check your email to confirm your account.");
+      } else {
+        toast.success("Account created!");
+        nav({ to: "/chats" });
+      }
     } catch (e: any) {
       toast.error(e.message);
     } finally { setBusy(false); }

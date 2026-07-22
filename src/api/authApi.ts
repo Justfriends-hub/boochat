@@ -113,6 +113,7 @@ export async function signUp(input: {
     email: input.email,
     password: input.password,
     options: {
+      emailRedirectTo: `${window.location.origin}/chats`,
       data: {
         display_name: input.displayName,
       },
@@ -130,7 +131,7 @@ export async function signUp(input: {
     return cachedUser;
   }
 
-  // If sign-up requires email confirmation, return a minimal user object until auth completes.
+  // If sign-up requires email confirmation, return a minimal user object and do not assume the user is logged in.
   return {
     id: "",
     email: input.email,
