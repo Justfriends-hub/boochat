@@ -16,6 +16,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 
+import { listMessages } from "@/api/messagesApi";
+import { getCachedMessages } from "@/lib/offlineStore";
 import type { Chat, Message } from "@/lib/mockStore";
 
 export const Route = createFileRoute("/_app/chats")({
@@ -47,6 +49,14 @@ function ChatsPage() {
     return unsub;
   }, [me, qc]);
 
+  // Pre-fetch/sync messages for all user chats to populate last message preview
+  useEffect(() => {
+    if (!me || !chats.length) return;
+    chats.forEach((c) => {
+      listMessages(c.id).catch(() => {});
+    });
+  }, [me, chats]);
+
   if (!me) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center bg-background">
@@ -69,10 +79,12 @@ function ChatsPage() {
     return chats
       .map((c) => {
         const other = c.type === "dm" ? users.find((u) => u.id === c.memberIds.find((x) => x !== me.id)) : null;
-        const name = c.type === "group" ? c.name : other?.displayName || "Chat";
+        const displayName = other?.displayName || (other?.email ? `@${other.email.split("@")[0]}` : undefined);
+        const name = c.type === "group" ? (c.name || "Group") : (displayName || "Chat User");
         const avatar = c.type === "group" ? c.avatar : other?.avatar;
         const online = other?.online;
-        const last: Message | undefined = undefined;
+        const cachedMsgs = getCachedMessages(c.id);
+        const last: Message | undefined = cachedMsgs.length > 0 ? cachedMsgs[cachedMsgs.length - 1] : undefined;
         const unread = 0;
         return { chat: c, name, avatar, online, last, unread };
       })
