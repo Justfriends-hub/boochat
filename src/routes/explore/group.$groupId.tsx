@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
@@ -7,28 +6,41 @@ import { getChat } from "@/api/chatsApi";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/explore/group/$groupId")({
+  loader: async ({ params }) => {
+    try {
+      const chat = await getChat(params.groupId);
+      return { chat, error: null };
+    } catch (error) {
+      return { chat: null, error: (error as Error).message };
+    }
+  },
   component: GroupPreview,
+  errorComponent: GroupPreviewError,
 });
+
+function GroupPreviewError({ error }: { error: Error }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
+      <div className="max-w-md text-center">
+        <h1 className="text-2xl font-bold">Unable to load group</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
+        <a href="/" className="mt-6 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+          Go home
+        </a>
+      </div>
+    </div>
+  );
+}
 
 function GroupPreview() {
   const { groupId } = Route.useParams();
   const me = useAuth();
-  const { data: chat, isLoading, error: chatError } = useQuery({
-    queryKey: ["explore.group", groupId],
-    queryFn: () => getChat(groupId),
-    retry: 1,
-  });
+  const loaderData = Route.useLoaderData();
+  
+  const chat = loaderData?.chat;
+  const error = loaderData?.error;
 
-  if (isLoading) {
-    return <div className="flex h-full flex-col items-center justify-center gap-4"><div>Loading group…</div></div>;
-  }
-
-  if (chatError) {
-    console.error("Group preview error:", chatError);
-    return <EmptyState title="Unable to load group" description={`Error: ${(chatError as Error).message}`} />;
-  }
-
-  if (!chat || chat.type !== "group") {
+  if (error || !chat || chat.type !== "group") {
     return <EmptyState title="Group not found" description="This group link is invalid or the group no longer exists." />;
   }
 

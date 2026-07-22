@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
@@ -7,28 +6,41 @@ import { getChannel } from "@/api/channelsApi";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/explore/channel/$channelId")({
+  loader: async ({ params }) => {
+    try {
+      const channel = await getChannel(params.channelId);
+      return { channel, error: null };
+    } catch (error) {
+      return { channel: null, error: (error as Error).message };
+    }
+  },
   component: ChannelPreview,
+  errorComponent: ChannelPreviewError,
 });
+
+function ChannelPreviewError({ error }: { error: Error }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
+      <div className="max-w-md text-center">
+        <h1 className="text-2xl font-bold">Unable to load channel</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
+        <a href="/" className="mt-6 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+          Go home
+        </a>
+      </div>
+    </div>
+  );
+}
 
 function ChannelPreview() {
   const { channelId } = Route.useParams();
   const me = useAuth();
-  const { data: channel, isLoading, error: channelError } = useQuery({
-    queryKey: ["explore.channel", channelId],
-    queryFn: () => getChannel(channelId),
-    retry: 1,
-  });
+  const loaderData = Route.useLoaderData();
+  
+  const channel = loaderData?.channel;
+  const error = loaderData?.error;
 
-  if (isLoading) {
-    return <div className="flex h-full flex-col items-center justify-center gap-4"><div>Loading channel…</div></div>;
-  }
-
-  if (channelError) {
-    console.error("Channel preview error:", channelError);
-    return <EmptyState title="Unable to load channel" description={`Error: ${(channelError as Error).message}`} />;
-  }
-
-  if (!channel) {
+  if (error || !channel) {
     return <EmptyState title="Channel not found" description="This channel link is invalid or the channel no longer exists." />;
   }
 
