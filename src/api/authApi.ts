@@ -7,12 +7,14 @@ let authReady = false;
 let initializePromise: Promise<void> | null = null;
 
 function toUser(profile: any, roles: Array<{ role: string }> | null = null): User {
+  const roleStr = roles?.[0]?.role ?? "user";
+  const role = roleStr === "superadmin" ? "superadmin" : roleStr === "admin" ? "admin" : "user";
   return {
     id: profile.id,
     email: profile.email,
     displayName: profile.display_name || profile.email.split("@")[0],
     avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`,
-    role: roles?.[0]?.role === "admin" ? "admin" : "user",
+    role,
     online: profile.online ?? false,
     banned: profile.banned ?? false,
     bio: profile.bio ?? undefined,
