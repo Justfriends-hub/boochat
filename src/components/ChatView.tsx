@@ -18,7 +18,7 @@ import {
   subscribeToChat, subscribeToTyping, markChatRead,
 } from "@/api/messagesApi";
 import { listChats, getChat } from "@/api/chatsApi";
-import { listUsers } from "@/api/usersApi";
+import { listUsers, getUser } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import { useUIStore } from "@/stores/uiStore";
 import { formatDay } from "@/lib/format";
@@ -45,10 +45,22 @@ export function ChatView({ chatId }: { chatId: string }) {
     queryKey: ["chat", chatId],
     queryFn: () => getChat(chatId),
   });
-  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
   const { data: messages = [] } = useQuery({
     queryKey: ["messages", chatId],
     queryFn: () => listMessages(chatId),
+  });
+
+  // Get other user ID for DMs
+  const otherUserId = useMemo(() => {
+    if (!chat || chat.type !== "dm" || !me) return null;
+    return chat.memberIds.find((x) => x !== me.id) || null;
+  }, [chat, me]);
+
+  // Fetch the other user directly for DMs
+  const { data: otherUser } = useQuery({
+    queryKey: ["user", otherUserId],
+    queryFn: () => otherUserId ? getUser(otherUserId) : null,
+    enabled: !!otherUserId,
   });
 
   useEffect(() => {
@@ -69,12 +81,6 @@ export function ChatView({ chatId }: { chatId: string }) {
   useEffect(() => {
     if (me) markChatRead(chatId, me.id);
   }, [chatId, me, messages.length]);
-
-  const otherUser = useMemo(() => {
-    if (!chat || chat.type !== "dm" || !me) return null;
-    const oid = chat.memberIds.find((x) => x !== me.id);
-    return users.find((u) => u.id === oid) || null;
-  }, [chat, me, users]);
 
   const title = chat?.type === "group" ? chat.name || "Group" : otherUser?.displayName || "Chat";
   const subtitle = chat?.type === "group"
