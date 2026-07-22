@@ -72,7 +72,7 @@ export function Composer({
 
   return (
     <div
-      className="border-t bg-background/95 backdrop-blur"
+      className="shrink-0 border-t bg-background/95 backdrop-blur z-20"
       style={{
         // Only offset when the visual keyboard height is > 0
         ...(kbOffset > 0 ? { transform: `translateY(-${kbOffset}px)` } : {}),
@@ -137,9 +137,9 @@ export function Composer({
                   }
                 }}
                 className={cn(
-                  "flex-1 resize-none bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground",
+                  "flex-1 resize-none bg-transparent py-1.5 text-base md:text-sm outline-none placeholder:text-muted-foreground",
                 )}
-                style={{ maxHeight: 128 }}
+                style={{ maxHeight: 128, fontSize: "16px" }}
               />
               <button
                 type="button"

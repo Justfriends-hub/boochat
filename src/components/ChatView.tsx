@@ -125,9 +125,9 @@ export function ChatView({ chatId }: { chatId: string }) {
   }
 
   return (
-    <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
-      {/* Header */}
-      <header className="flex h-16 items-center gap-3 border-b bg-card px-3 shrink-0">
+    <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden select-none">
+      {/* Header - Stiff fixed at top, never moves or collapses */}
+      <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b bg-card px-3 shadow-xs">
         <Button variant="ghost" size="icon" onClick={() => router.history.back()} className="md:hidden">
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -138,7 +138,7 @@ export function ChatView({ chatId }: { chatId: string }) {
           online={otherUser?.online}
         />
         <div className="flex-1 min-w-0">
-          <p className="truncate font-semibold">{title}</p>
+          <p className="truncate font-semibold text-base md:text-sm">{title}</p>
           <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
         </div>
         <Button variant="ghost" size="icon" onClick={() => setShowSearch((s) => !s)}>
@@ -147,18 +147,19 @@ export function ChatView({ chatId }: { chatId: string }) {
         <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5" /></Button>
       </header>
       {showSearch && (
-        <div className="border-b p-2">
+        <div className="sticky top-16 z-10 shrink-0 border-b bg-card p-2">
           <Input
             autoFocus
             placeholder="Search in conversation"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            className="text-base md:text-sm"
           />
         </div>
       )}
 
-      {/* Messages (only scrollable region) */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto bg-muted/30 py-3">
+      {/* Messages (only scrollable region, overscroll contained) */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain bg-muted/30 py-3">
         {filtered.length === 0 ? (
           <EmptyState icon={MessageCircle} title="No messages yet" description="Say hello 👋" />
         ) : (
