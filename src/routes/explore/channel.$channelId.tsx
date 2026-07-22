@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
 import { getChannel } from "@/api/channelsApi";
-import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/explore/channel/$channelId")({
@@ -14,24 +13,24 @@ export const Route = createFileRoute("/explore/channel/$channelId")({
 function ChannelPreview() {
   const { channelId } = Route.useParams();
   const me = useAuth();
-  const { data: channel, isLoading } = useQuery({
+  const { data: channel, isLoading, error: channelError } = useQuery({
     queryKey: ["explore.channel", channelId],
     queryFn: () => getChannel(channelId),
-  });
-  const { data: users = [] } = useQuery({
-    queryKey: ["users"],
-    queryFn: listUsers,
+    retry: 1,
   });
 
   if (isLoading) {
-    return <div className="flex h-full items-center justify-center">Loading channel…</div>;
+    return <div className="flex h-full flex-col items-center justify-center gap-4"><div>Loading channel…</div></div>;
+  }
+
+  if (channelError) {
+    console.error("Channel preview error:", channelError);
+    return <EmptyState title="Unable to load channel" description={`Error: ${(channelError as Error).message}`} />;
   }
 
   if (!channel) {
     return <EmptyState title="Channel not found" description="This channel link is invalid or the channel no longer exists." />;
   }
-
-  const owner = users.find((u) => u.id === channel.ownerId);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
@@ -49,8 +48,8 @@ function ChannelPreview() {
             <p className="mt-2 text-lg font-semibold">{channel.memberIds.length}</p>
           </div>
           <div className="rounded-2xl border bg-muted p-4">
-            <p className="text-xs uppercase text-muted-foreground">Owner</p>
-            <p className="mt-2 text-lg font-semibold">{owner?.displayName || "Unknown"}</p>
+            <p className="text-xs uppercase text-muted-foreground">Owner ID</p>
+            <p className="mt-2 text-xs font-mono">{channel.ownerId.slice(0, 8)}…</p>
           </div>
           <div className="rounded-2xl border bg-muted p-4">
             <p className="text-xs uppercase text-muted-foreground">Created</p>

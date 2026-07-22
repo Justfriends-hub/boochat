@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
 import { getChat } from "@/api/chatsApi";
-import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/explore/group/$groupId")({
@@ -14,24 +13,24 @@ export const Route = createFileRoute("/explore/group/$groupId")({
 function GroupPreview() {
   const { groupId } = Route.useParams();
   const me = useAuth();
-  const { data: chat, isLoading } = useQuery({
+  const { data: chat, isLoading, error: chatError } = useQuery({
     queryKey: ["explore.group", groupId],
     queryFn: () => getChat(groupId),
-  });
-  const { data: users = [] } = useQuery({
-    queryKey: ["users"],
-    queryFn: listUsers,
+    retry: 1,
   });
 
   if (isLoading) {
-    return <div className="flex h-full items-center justify-center">Loading group…</div>;
+    return <div className="flex h-full flex-col items-center justify-center gap-4"><div>Loading group…</div></div>;
+  }
+
+  if (chatError) {
+    console.error("Group preview error:", chatError);
+    return <EmptyState title="Unable to load group" description={`Error: ${(chatError as Error).message}`} />;
   }
 
   if (!chat || chat.type !== "group") {
     return <EmptyState title="Group not found" description="This group link is invalid or the group no longer exists." />;
   }
-
-  const owner = users.find((u) => u.id === chat.ownerId);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-background text-foreground">
@@ -49,8 +48,8 @@ function GroupPreview() {
             <p className="mt-2 text-lg font-semibold">{chat.memberIds.length}</p>
           </div>
           <div className="rounded-2xl border bg-muted p-4">
-            <p className="text-xs uppercase text-muted-foreground">Owner</p>
-            <p className="mt-2 text-lg font-semibold">{owner?.displayName || "Unknown"}</p>
+            <p className="text-xs uppercase text-muted-foreground">Owner ID</p>
+            <p className="mt-2 text-xs font-mono">{chat.ownerId?.slice(0, 8)}…</p>
           </div>
           <div className="rounded-2xl border bg-muted p-4">
             <p className="text-xs uppercase text-muted-foreground">Created</p>
