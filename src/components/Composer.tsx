@@ -74,7 +74,8 @@ export function Composer({
     <div
       className="border-t bg-background/95 backdrop-blur"
       style={{
-        transform: `translateY(-${kbOffset}px)`,
+        // Only offset when the visual keyboard height is > 0
+        ...(kbOffset > 0 ? { transform: `translateY(-${kbOffset}px)` } : {}),
         paddingBottom: "env(safe-area-inset-bottom)",
         transition: "transform 0.15s ease-out",
       }}

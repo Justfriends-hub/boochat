@@ -125,7 +125,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden" style={{ height: "100dvh" }}>
+    <div className="flex flex-1 flex-col overflow-hidden h-screen">
       {/* Header */}
       <header className="flex h-16 items-center gap-3 border-b bg-card px-3 shrink-0">
         <Button variant="ghost" size="icon" onClick={() => router.history.back()} className="md:hidden">
@@ -158,7 +158,7 @@ export function ChatView({ chatId }: { chatId: string }) {
       )}
 
       {/* Messages (only scrollable region) */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto bg-muted/30 py-3">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto bg-muted/30 py-3">
         {filtered.length === 0 ? (
           <EmptyState icon={MessageCircle} title="No messages yet" description="Say hello 👋" />
         ) : (
