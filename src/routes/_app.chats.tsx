@@ -27,7 +27,7 @@ export const Route = createFileRoute("/_app/chats")({
 
 function ChatsPage() {
   const me = useAuth();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const qc = useQueryClient();
   const nav = useNavigate();
   const [search, setSearch] = useState("");
