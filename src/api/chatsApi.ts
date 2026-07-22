@@ -20,6 +20,15 @@ function mapChat(chat: any, members: string[], group: any | null): Chat {
   return base;
 }
 
+function handleSupabaseError(error: any, context: string): Error {
+  if (error?.message?.includes("policy")) {
+    return new Error(
+      `⚠️ RLS Policy Error: ${context}\n\nYour Supabase RLS policies may be blocking this operation.\n\nPlease check:\n1. Row Level Security (RLS) is ENABLED on the tables\n2. Policies allow authenticated users to INSERT/SELECT\n3. Auth user is properly authenticated\n\nSee: https://supabase.com/docs/guides/auth/row-level-security`
+    );
+  }
+  return new Error(error?.message || context);
+}
+
 async function fetchChatMembers(chatIds: string[]) {
   const supabase = ensureSupabase();
   const { data, error } = await supabase
@@ -100,7 +109,7 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
     .from("chat_members")
     .select("chat_id")
     .eq("user_id", userA);
-  if (userAError) throw new Error(userAError.message);
+  if (userAError) throw handleSupabaseError(userAError, "Failed to fetch user's chats");
 
   const chatIds = (userAChats ?? []).map((row) => row.chat_id);
   if (chatIds.length) {
@@ -109,7 +118,7 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
       .select("chat_id")
       .in("chat_id", chatIds)
       .eq("user_id", userB);
-    if (sharedError) throw new Error(sharedError.message);
+    if (sharedError) throw handleSupabaseError(sharedError, "Failed to check for existing chat");
 
     const sharedIds = (sharedChats ?? []).map((row) => row.chat_id);
     if (sharedIds.length) {
@@ -119,14 +128,14 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
         .in("id", sharedIds)
         .eq("type", "dm")
         .limit(1);
-      if (chatError) throw new Error(chatError.message);
+      if (chatError) throw handleSupabaseError(chatError, "Failed to fetch chat details");
       if (chats?.length) {
         const chat = chats[0];
         const { data: memberRows, error: memberError } = await supabase
           .from("chat_members")
           .select("user_id")
           .eq("chat_id", chat.id);
-        if (memberError) throw new Error(memberError.message);
+        if (memberError) throw handleSupabaseError(memberError, "Failed to fetch chat members");
         return mapChat(chat, (memberRows ?? []).map((row) => row.user_id), null);
       }
     }
@@ -137,13 +146,17 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
     .insert([{ type: "dm" }])
     .select()
     .single();
-  if (createChatError || !newChat) throw new Error(createChatError?.message || "Unable to create chat.");
+  if (createChatError || !newChat) {
+    throw handleSupabaseError(createChatError, "Failed to create new chat. Check RLS policies on the 'chats' table.");
+  }
 
   const { error: membershipError } = await supabase.from("chat_members").insert([
     { chat_id: newChat.id, user_id: userA },
     { chat_id: newChat.id, user_id: userB },
   ]);
-  if (membershipError) throw new Error(membershipError.message);
+  if (membershipError) {
+    throw handleSupabaseError(membershipError, "Failed to add members to chat. Check RLS policies on the 'chat_members' table.");
+  }
 
   publish("chats:changed");
   return mapChat(newChat, [userA, userB], null);
@@ -167,7 +180,9 @@ export async function createGroup(input: {
     ])
     .select()
     .single();
-  if (createChatError || !newChat) throw new Error(createChatError?.message || "Unable to create group chat.");
+  if (createChatError || !newChat) {
+    throw handleSupabaseError(createChatError, "Failed to create group. Check RLS policies on the 'chats' table.");
+  }
 
   const { data: groupRow, error: createGroupError } = await supabase
     .from("groups")
@@ -181,12 +196,16 @@ export async function createGroup(input: {
     ])
     .select()
     .single();
-  if (createGroupError || !groupRow) throw new Error(createGroupError?.message || "Unable to create group metadata.");
+  if (createGroupError || !groupRow) {
+    throw handleSupabaseError(createGroupError, "Failed to create group metadata. Check RLS policies on the 'groups' table.");
+  }
 
   const members = Array.from(new Set([input.ownerId, ...input.memberIds]));
   const memberRows = members.map((userId) => ({ chat_id: newChat.id, user_id: userId }));
   const { error: membershipError } = await supabase.from("chat_members").insert(memberRows);
-  if (membershipError) throw new Error(membershipError.message);
+  if (membershipError) {
+    throw handleSupabaseError(membershipError, "Failed to add members to group. Check RLS policies on the 'chat_members' table.");
+  }
 
   publish("chats:changed");
   return mapChat(newChat, members, groupRow);

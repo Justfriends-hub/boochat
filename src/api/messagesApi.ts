@@ -19,6 +19,15 @@ function mapMessage(row: any): Message {
   };
 }
 
+function handleSupabaseError(error: any, context: string): Error {
+  if (error?.message?.includes("policy")) {
+    return new Error(
+      `⚠️ RLS Policy Error: ${context}\n\nYour Supabase RLS policies may be blocking this operation.\n\nSee: https://supabase.com/docs/guides/auth/row-level-security`
+    );
+  }
+  return new Error(error?.message || context);
+}
+
 export async function listMessages(chatId: string): Promise<Message[]> {
   const supabase = ensureSupabase();
   const { data, error } = await supabase
@@ -50,7 +59,9 @@ export async function sendMessage(input: {
     .insert([insert])
     .select()
     .single();
-  if (error || !data) throw new Error(error.message || "Failed to send message.");
+  if (error || !data) {
+    throw handleSupabaseError(error, "Failed to send message. Check RLS policies on the 'messages' table.");
+  }
 
   await supabase.from("chats").update({ updated_at: new Date().toISOString() }).eq("id", input.chatId);
   return mapMessage(data);
