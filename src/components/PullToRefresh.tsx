@@ -57,7 +57,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
   }, [queryClient, resetPull]);
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (refreshing || event.button !== 0) return;
+    if (refreshing || event.button !== 0 || event.pointerType !== "touch") return;
     if (!isAtTop(event.target)) return;
     startYRef.current = event.clientY;
     pointerIdRef.current = event.pointerId;
