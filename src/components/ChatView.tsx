@@ -4,6 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import { ArrowLeft, Search, MoreVertical, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -126,8 +127,8 @@ export function ChatView({ chatId }: { chatId: string }) {
 
   return (
     <div className="relative flex flex-1 flex-col h-full min-h-0 overflow-hidden select-none">
-      {/* Header - Permanently stiff & fixed at top with backdrop blur so scrolling messages pass under it */}
-      <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-card/95 backdrop-blur-md px-3 shadow-xs">
+      {/* Header - Permanently fixed at top-0 with z-30 so all messages scroll underneath it */}
+      <header className="absolute top-0 inset-x-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-card/95 backdrop-blur-md px-3 shadow-xs">
         <Button variant="ghost" size="icon" onClick={() => router.history.back()} className="md:hidden">
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -147,7 +148,7 @@ export function ChatView({ chatId }: { chatId: string }) {
         <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5" /></Button>
       </header>
       {showSearch && (
-        <div className="sticky top-16 z-20 shrink-0 border-b bg-card/95 backdrop-blur-md p-2">
+        <div className="absolute top-16 inset-x-0 z-20 shrink-0 border-b bg-card/95 backdrop-blur-md p-2">
           <Input
             autoFocus
             placeholder="Search in conversation"
@@ -159,8 +160,14 @@ export function ChatView({ chatId }: { chatId: string }) {
         </div>
       )}
 
-      {/* Messages (only scrollable region, overscroll contained) */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain bg-muted/30 py-3">
+      {/* Messages (only scrollable region, padded top so messages start below header and scroll under it) */}
+      <div
+        ref={scrollRef}
+        className={cn(
+          "flex-1 min-h-0 overflow-y-auto overscroll-contain bg-muted/30 pb-3",
+          showSearch ? "pt-28" : "pt-16",
+        )}
+      >
         {filtered.length === 0 ? (
           <EmptyState icon={MessageCircle} title="No messages yet" description="Say hello 👋" />
         ) : (

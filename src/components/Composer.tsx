@@ -74,10 +74,7 @@ export function Composer({
     <div
       className="shrink-0 border-t bg-background/95 backdrop-blur z-20"
       style={{
-        // Only offset when the visual keyboard height is > 0
-        ...(kbOffset > 0 ? { transform: `translateY(-${kbOffset}px)` } : {}),
         paddingBottom: "env(safe-area-inset-bottom)",
-        transition: "transform 0.15s ease-out",
       }}
     >
       {replyTo && (
