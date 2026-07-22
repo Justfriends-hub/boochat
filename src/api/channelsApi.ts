@@ -131,12 +131,21 @@ export async function createChannel(input: { name: string; description: string; 
   return ch;
 }
 
-export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[] }) {
+export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[]; name?: string; description?: string; avatar?: string; }) {
   const supabase = ensureSupabase();
   
   const updateData: any = {};
   if (updates.onlyAdminsPost !== undefined) {
     updateData.only_admins_post = updates.onlyAdminsPost;
+  }
+  if (updates.name !== undefined) {
+    updateData.name = updates.name;
+  }
+  if (updates.description !== undefined) {
+    updateData.description = updates.description;
+  }
+  if (updates.avatar !== undefined) {
+    updateData.avatar_url = updates.avatar;
   }
 
   if (Object.keys(updateData).length > 0) {

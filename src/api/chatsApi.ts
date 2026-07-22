@@ -226,10 +226,11 @@ export async function createGroup(input: {
 
 export async function updateChat(id: string, patch: Partial<Chat>) {
   const supabase = ensureSupabase();
-  if (patch.name !== undefined || patch.avatar !== undefined) {
+  if (patch.name !== undefined || patch.avatar !== undefined || patch.muted !== undefined) {
     const update: Record<string, any> = {};
     if (patch.name !== undefined) update.name = patch.name;
     if (patch.avatar !== undefined) update.avatar_url = patch.avatar;
+    if (patch.muted !== undefined) update.muted = patch.muted;
     const { error } = await supabase.from("chats").update(update).eq("id", id);
     if (error) throw new Error(error.message);
   }

@@ -1,14 +1,14 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info } from "lucide-react";
+import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Link as LinkIcon, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
 import { Composer } from "@/components/Composer";
 import {
   getChannel, listPosts, createPost, togglePostLike, markPostViewed, likeCount, viewCount,
-  subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe,
+  subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe, updateChannel,
 } from "@/api/channelsApi";
 import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
@@ -19,6 +19,8 @@ import type { ChannelPost } from "@/lib/mockStore";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/_app/channels/$channelId")({
   component: ChannelPage,
@@ -36,7 +38,12 @@ function ChannelPage() {
   const [postImage, setPostImage] = useState<string | undefined>(undefined);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [editWallpaper, setEditWallpaper] = useState(false);
+  const [wallpaperUrl, setWallpaperUrl] = useState("");
+  const [shareLink, setShareLink] = useState("");
+  const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const wallpaperFileRef = useRef<HTMLInputElement>(null);
 
   const { data: channel } = useQuery({ queryKey: ["channel", channelId], queryFn: () => getChannel(channelId) });
   const { data: posts = [] } = useQuery({ queryKey: ["posts", channelId], queryFn: () => listPosts(channelId) });
@@ -50,6 +57,12 @@ function ChannelPage() {
   useEffect(() => {
     posts.forEach((p) => markPostViewed(p.id, sessionId));
   }, [posts, sessionId]);
+
+  useEffect(() => {
+    // Generate share link
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    setShareLink(`${baseUrl}/explore/channel/${channelId}`);
+  }, [channelId]);
 
   const isSuperAdmin = me.role === "admin";
   const isOwner = channel?.ownerId === me.id;
@@ -100,6 +113,33 @@ function ChannelPage() {
     e.target.value = "";
   };
 
+  const handleWallpaperSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const imageUrl = String(reader.result);
+      setWallpaperUrl(imageUrl);
+      try {
+        await updateChannel(channelId, { avatar: imageUrl });
+        toast.success("Channel wallpaper updated!");
+        setEditWallpaper(false);
+        qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      } catch (err: any) {
+        toast.error(err.message || "Failed to update wallpaper");
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const copyShareLink = () => {
+    navigator.clipboard.writeText(shareLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.success("Link copied to clipboard!");
+  };
+
   const doLike = (post: ChannelPost) => {
     qc.setQueryData<ChannelPost[]>(["posts", channelId], (old) =>
       old?.map((p) => p.id === post.id
@@ -111,7 +151,7 @@ function ChannelPage() {
 
   return (
     <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
-      <header className="flex h-16 items-center gap-3 border-b bg-card px-3">
+      <header className="flex h-16 items-center gap-2 border-b bg-card px-3">
         <Button variant="ghost" size="icon" onClick={() => router.history.back()}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -124,20 +164,16 @@ function ChannelPage() {
           <p className="truncate text-xs text-muted-foreground">{channel?.memberIds.length} subscribers</p>
         </div>
         <Button
-          size="icon"
-          variant="ghost"
-          onClick={() => setInfoOpen(true)}
-          className="shrink-0"
-        >
-          <Info className="h-5 w-5" />
-        </Button>
-        <Button
           size="sm"
           variant={isSubscribed ? "outline" : "default"}
           onClick={handleSubscribe}
-          className="rounded-full shrink-0"
+          className="rounded-full shrink-0 gap-1"
         >
           {isSubscribed ? "Subscribed" : "Subscribe"}
+          <Info className="h-4 w-4" onClick={(e) => {
+            e.stopPropagation();
+            setInfoOpen(true);
+          }} />
         </Button>
       </header>
 
@@ -229,32 +265,79 @@ function ChannelPage() {
       </Sheet>
 
       <Sheet open={infoOpen} onOpenChange={setInfoOpen}>
-        <SheetContent side="bottom" className="h-auto flex flex-col p-0">
+        <SheetContent side="right" className="w-[50vw] flex flex-col p-0 max-w-2xl">
           <SheetHeader className="p-4 border-b">
-            <SheetTitle>Channel Information</SheetTitle>
+            <SheetTitle>Channel Details</SheetTitle>
           </SheetHeader>
-          <div className="p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
             {channel && (
               <>
-                <div className="flex items-center gap-3">
-                  <UserAvatar name={channel.name} src={channel.avatar} size={64} />
+                {/* Wallpaper/Avatar Section */}
+                <div className="space-y-3">
+                  <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-muted">
+                    {channel.avatar && <img src={channel.avatar} alt="" className="w-full h-full object-cover" />}
+                  </div>
+                  {isOwner && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full gap-2"
+                      onClick={() => wallpaperFileRef.current?.click()}
+                    >
+                      <ImageIcon className="h-4 w-4" />
+                      Change Wallpaper
+                    </Button>
+                  )}
+                  <input
+                    ref={wallpaperFileRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={handleWallpaperSelect}
+                  />
+                </div>
+
+                {/* Channel Info */}
+                <div className="space-y-3">
                   <div>
-                    <h2 className="font-semibold text-lg">{channel.name}</h2>
-                    <p className="text-sm text-muted-foreground">{channel.description}</p>
+                    <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Name</p>
+                    <p className="text-sm font-semibold">{channel.name}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Description</p>
+                    <p className="text-sm text-muted-foreground">{channel.description || "No description"}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Members</p>
+                      <p className="text-lg font-semibold">{channel.memberIds.length}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Created</p>
+                      <p className="text-sm">{new Date(channel.createdAt).toLocaleDateString()}</p>
+                    </div>
                   </div>
                 </div>
-                <div className="space-y-2 pt-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Total Members</span>
-                    <span className="font-semibold">{channel.memberIds.length}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Channel Owner</span>
-                    <span className="font-semibold">{users.find((u) => u.id === channel.ownerId)?.displayName || "Unknown"}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Created</span>
-                    <span className="font-semibold text-sm">{new Date(channel.createdAt).toLocaleDateString()}</span>
+
+                {/* Share Link Section */}
+                <div className="space-y-2 p-3 rounded-lg bg-muted/50">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Share Channel</p>
+                  <p className="text-xs text-muted-foreground">Anyone with this link can preview this channel</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={shareLink}
+                      readOnly
+                      className="flex-1 text-sm px-2 py-1.5 rounded bg-background border border-input"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={copyShareLink}
+                      className="gap-1"
+                    >
+                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
                   </div>
                 </div>
               </>
