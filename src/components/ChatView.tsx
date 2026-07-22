@@ -45,6 +45,7 @@ export function ChatView({ chatId }: { chatId: string }) {
     queryKey: ["chat", chatId],
     queryFn: () => getChat(chatId),
   });
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
   const { data: messages = [] } = useQuery({
     queryKey: ["messages", chatId],
     queryFn: () => listMessages(chatId),
