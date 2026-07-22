@@ -156,8 +156,8 @@ function ChatsPage() {
                   onClick={async () => {
                     try {
                       const c = await getOrCreateDM(me.id, u.id);
-                      nav({ to: "/chats/$chatId", params: { chatId: c.id } });
                       setNewChatOpen(false);
+                      nav({ to: "/chats/$chatId", params: { chatId: c.id } });
                     } catch (error) {
                       console.error("Unable to start chat:", error);
                     }

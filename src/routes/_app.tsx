@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppNav } from "@/components/AppNav";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import { useAuth, useAuthReady } from "@/hooks/useAuth";
 import { initStore } from "@/lib/mockStore";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
@@ -33,7 +34,9 @@ function AppLayout() {
       <AppNav />
       <main className="flex flex-1 flex-col pb-14 md:pb-0 overflow-hidden" style={{ minHeight: "100dvh" }}>
         <FeatureBoundary name="page">
-          <Outlet />
+          <PullToRefresh>
+            <Outlet />
+          </PullToRefresh>
         </FeatureBoundary>
       </main>
     </div>
