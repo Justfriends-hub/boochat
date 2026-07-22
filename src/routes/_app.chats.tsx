@@ -11,6 +11,7 @@ import { listChats, getOrCreateDM, subscribeToChats } from "@/api/chatsApi";
 import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import { timeAgo } from "@/lib/format";
+import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -27,6 +28,7 @@ function ChatsPage() {
   const nav = useNavigate();
   const [search, setSearch] = useState("");
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const [loadingUserId, setLoadingUserId] = useState<string | null>(null);
 
   const isChatDetailRoute = pathname !== "/chats" && pathname.startsWith("/chats/");
 
@@ -153,19 +155,30 @@ function ChatsPage() {
                 <button
                   key={u.id}
                   type="button"
+                  disabled={loadingUserId === u.id}
                   onClick={async () => {
+                    setLoadingUserId(u.id);
                     try {
                       const c = await getOrCreateDM(me.id, u.id);
                       setNewChatOpen(false);
+                      setLoadingUserId(null);
                       nav({ to: "/chats/$chatId", params: { chatId: c.id } });
                     } catch (error) {
+                      setLoadingUserId(null);
+                      const message = error instanceof Error ? error.message : "Failed to start chat";
                       console.error("Unable to start chat:", error);
+                      toast.error(message);
                     }
                   }}
-                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-muted"
+                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <UserAvatar name={u.displayName} src={u.avatar} online={u.online} size={40} />
-                  <div>
+                  {loadingUserId === u.id && (
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  )}
+                  {loadingUserId !== u.id && (
+                    <UserAvatar name={u.displayName} src={u.avatar} online={u.online} size={40} />
+                  )}
+                  <div className="flex-1">
                     <p className="font-medium">{u.displayName}</p>
                     <p className="text-xs text-muted-foreground">{u.email}</p>
                   </div>

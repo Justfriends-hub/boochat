@@ -12,6 +12,7 @@ import { FeatureBoundary } from "@/components/FeatureBoundary";
 import { listChats, createGroup, subscribeToChats } from "@/api/chatsApi";
 import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -28,6 +29,7 @@ function GroupsPage() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
 
   const { data: chats = [] } = useQuery({
     queryKey: ["chats", me?.id ?? ""],
@@ -53,10 +55,25 @@ function GroupsPage() {
   const groups = chats.filter((c) => c.type === "group");
 
   const create = async () => {
-    if (!name.trim()) return;
-    const g = await createGroup({ name: name.trim(), memberIds: selected, ownerId: me.id });
-    setOpen(false); setName(""); setSelected([]);
-    nav({ to: "/groups/$groupId", params: { groupId: g.id } });
+    if (!name.trim()) {
+      toast.error("Please enter a group name");
+      return;
+    }
+    setIsCreating(true);
+    try {
+      const g = await createGroup({ name: name.trim(), memberIds: selected, ownerId: me.id });
+      setOpen(false);
+      setName("");
+      setSelected([]);
+      setIsCreating(false);
+      toast.success("Group created!");
+      nav({ to: "/groups/$groupId", params: { groupId: g.id } });
+    } catch (error) {
+      setIsCreating(false);
+      const message = error instanceof Error ? error.message : "Failed to create group";
+      console.error("Unable to create group:", error);
+      toast.error(message);
+    }
   };
 
   return (
@@ -122,8 +139,10 @@ function GroupsPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button onClick={create} disabled={!name.trim()}>Create</Button>
+              <Button variant="outline" onClick={() => setOpen(false)} disabled={isCreating}>Cancel</Button>
+              <Button onClick={create} disabled={!name.trim() || isCreating}>
+                {isCreating ? "Creating..." : "Create"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -8,15 +8,47 @@ export async function listChannels(): Promise<Channel[]> {
 export async function getChannel(id: string) {
   return getState().channels.find((c) => c.id === id);
 }
-export async function createChannel(input: { name: string; description: string; ownerId: string }) {
+export async function createChannel(input: { name: string; description: string; ownerId: string; onlyAdminsPost?: boolean }) {
   const ch: Channel = {
     id: uid(), name: input.name, description: input.description,
     avatar: `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(input.name)}`,
-    ownerId: input.ownerId, memberIds: [input.ownerId], createdAt: Date.now(),
+    ownerId: input.ownerId, adminIds: [input.ownerId], memberIds: [input.ownerId], 
+    onlyAdminsPost: input.onlyAdminsPost ?? true,
+    createdAt: Date.now(),
   };
   setState((s) => { s.channels.push(ch); });
   publish("channels:changed");
   return ch;
+}
+
+export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[] }) {
+  setState((s) => {
+    const ch = s.channels.find((c) => c.id === id);
+    if (!ch) return;
+    if (updates.onlyAdminsPost !== undefined) ch.onlyAdminsPost = updates.onlyAdminsPost;
+    if (updates.adminIds !== undefined) ch.adminIds = updates.adminIds;
+  });
+  publish("channels:changed");
+}
+
+export async function addChannelAdmin(channelId: string, userId: string) {
+  setState((s) => {
+    const ch = s.channels.find((c) => c.id === channelId);
+    if (ch && !ch.adminIds.includes(userId)) {
+      ch.adminIds.push(userId);
+    }
+  });
+  publish("channels:changed");
+}
+
+export async function removeChannelAdmin(channelId: string, userId: string) {
+  setState((s) => {
+    const ch = s.channels.find((c) => c.id === channelId);
+    if (ch) {
+      ch.adminIds = ch.adminIds.filter((id) => id !== userId);
+    }
+  });
+  publish("channels:changed");
 }
 
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
@@ -31,6 +63,11 @@ export async function getPost(id: string) {
 export async function createPost(input: {
   channelId: string; authorId: string; kind: "text" | "image"; body: string; image?: string;
 }) {
+  const channel = getState().channels.find((c) => c.id === input.channelId);
+  if (!channel) throw new Error("Channel not found");
+  if (channel.onlyAdminsPost && !channel.adminIds.includes(input.authorId)) {
+    throw new Error("Only channel admins can post in this channel");
+  }
   const p: ChannelPost = {
     id: uid(), channelId: input.channelId, authorId: input.authorId,
     kind: input.kind, body: input.body, image: input.image,

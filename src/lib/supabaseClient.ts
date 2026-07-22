@@ -16,9 +16,8 @@ export const supabase: SupabaseClient | null = supabaseConfigured
 
 export function ensureSupabase(): SupabaseClient {
   if (!supabaseConfigured || !supabase) {
-    throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY."
-    );
+    console.warn("⚠️ Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.");
+    throw new Error("Supabase is not configured. Please set environment variables.");
   }
   return supabase;
 }

@@ -110,6 +110,9 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     resetPull();
   };
 
+  const pullProgress = Math.min(pullDistance / (window.innerHeight * PULL_THRESHOLD_RATIO), 1);
+  const shouldShowIndicator = isDraggingRef.current && pullDistance > 0;
+
   return (
     <div
       className="relative overflow-hidden"
@@ -118,7 +121,27 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
       onPointerUp={finishDrag}
       onPointerCancel={handlePointerCancel}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center">
+        {/* Pull progress indicator */}
+        {shouldShowIndicator && (
+          <div
+            className="mt-2 h-7 w-7 rounded-full border-2 border-primary/40 transition-all"
+            style={{
+              opacity: Math.min(pullProgress + 0.3, 1),
+              borderColor: pullProgress >= 1 ? "rgb(var(--color-primary))" : "rgba(var(--color-primary-rgb), 0.4)",
+              boxShadow: pullProgress >= 1 ? "0 0 0 4px rgba(var(--color-primary-rgb), 0.1)" : "none",
+            }}
+          >
+            <div
+              className="absolute inset-0 rounded-full transition-all"
+              style={{
+                background: `conic-gradient(rgb(var(--color-primary)), rgb(var(--color-primary)) ${pullProgress * 100}%, transparent ${pullProgress * 100}%)`,
+                opacity: Math.max(pullProgress - 0.2, 0) * 0.6,
+              }}
+            />
+          </div>
+        )}
+        {/* Loading spinner during refresh */}
         <div
           className={cn(
             "mt-3 h-8 w-8 rounded-full border-2 border-primary border-t-transparent transition-opacity",

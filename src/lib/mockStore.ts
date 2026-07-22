@@ -62,7 +62,9 @@ export type Channel = {
   description: string;
   avatar: string;
   ownerId: string;
+  adminIds: string[];
   memberIds: string[];
+  onlyAdminsPost: boolean;
   createdAt: number;
 };
 export type ChannelPost = {
