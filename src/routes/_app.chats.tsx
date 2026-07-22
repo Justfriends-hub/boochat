@@ -152,10 +152,15 @@ function ChatsPage() {
               {users.filter((u) => u.id !== me.id).map((u) => (
                 <button
                   key={u.id}
+                  type="button"
                   onClick={async () => {
-                    const c = await getOrCreateDM(me.id, u.id);
-                    setNewChatOpen(false);
-                    nav({ to: "/chats/$chatId", params: { chatId: c.id } });
+                    try {
+                      const c = await getOrCreateDM(me.id, u.id);
+                      nav({ to: "/chats/$chatId", params: { chatId: c.id } });
+                      setNewChatOpen(false);
+                    } catch (error) {
+                      console.error("Unable to start chat:", error);
+                    }
                   }}
                   className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-muted"
                 >
