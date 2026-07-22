@@ -172,22 +172,14 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
     console.warn("Error checking existing chats:", checkError);
   }
 
-  // Create new chat
-  const { data: newChat, error: createChatError } = await supabase
-    .from("chats")
-    .insert([{ type: "dm" }])
-    .select()
-    .single();
+  // Create new chat via RPC so the backend can handle creator membership
+  const { data: newChat, error: createChatError } = await supabase.rpc("create_chat", {
+    _type: "dm",
+    _name: null,
+    _avatar_url: null,
+  });
   if (createChatError || !newChat) {
     throw handleSupabaseError(createChatError, "Failed to create new chat. Check RLS policies on the 'chats' table.");
-  }
-
-  const { error: membershipError } = await supabase.from("chat_members").insert([
-    { chat_id: newChat.id, user_id: userA },
-    { chat_id: newChat.id, user_id: userB },
-  ]);
-  if (membershipError) {
-    throw handleSupabaseError(membershipError, "Failed to add members to chat. Check RLS policies on the 'chat_members' table.");
   }
 
   publish("chats:changed");
@@ -201,17 +193,11 @@ export async function createGroup(input: {
   avatar?: string;
 }): Promise<Chat> {
   const supabase = ensureSupabase();
-  const { data: newChat, error: createChatError } = await supabase
-    .from("chats")
-    .insert([
-      {
-        type: "group",
-        name: input.name,
-        avatar_url: input.avatar,
-      },
-    ])
-    .select()
-    .single();
+  const { data: newChat, error: createChatError } = await supabase.rpc("create_chat", {
+    _type: "group",
+    _name: input.name,
+    _avatar_url: input.avatar ?? null,
+  });
   if (createChatError || !newChat) {
     throw handleSupabaseError(createChatError, "Failed to create group. Check RLS policies on the 'chats' table.");
   }
@@ -233,10 +219,13 @@ export async function createGroup(input: {
   }
 
   const members = Array.from(new Set([input.ownerId, ...input.memberIds]));
-  const memberRows = members.map((userId) => ({ chat_id: newChat.id, user_id: userId }));
-  const { error: membershipError } = await supabase.from("chat_members").insert(memberRows);
-  if (membershipError) {
-    throw handleSupabaseError(membershipError, "Failed to add members to group. Check RLS policies on the 'chat_members' table.");
+  const otherMembers = members.filter((userId) => userId !== input.ownerId);
+  const memberRows = otherMembers.map((userId) => ({ chat_id: newChat.id, user_id: userId }));
+  if (memberRows.length) {
+    const { error: membershipError } = await supabase.from("chat_members").insert(memberRows);
+    if (membershipError) {
+      throw handleSupabaseError(membershipError, "Failed to add members to group. Check RLS policies on the 'chat_members' table.");
+    }
   }
 
   publish("chats:changed");
