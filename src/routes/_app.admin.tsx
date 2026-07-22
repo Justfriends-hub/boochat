@@ -31,9 +31,11 @@ import {
   exportAuditLog,
 } from "@/api/adminApi";
 import { listUsers } from "@/api/usersApi";
-import { listPosts, likeCount, viewCount } from "@/api/channelsApi";
+import { listPosts, listChannels, subscribeToChannels } from "@/api/channelsApi";
+import { subscribeToChats } from "@/api/chatsApi";
 import { listActiveStatuses } from "@/api/statusApi";
 import { getState } from "@/lib/mockStore";
+import { subscribe } from "@/lib/eventBus";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { timeAgo } from "@/lib/format";
@@ -89,10 +91,19 @@ function AdminPage() {
   const { data: stats } = useQuery({ queryKey: ["admin.stats"], queryFn: overviewStats });
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
   const { data: posts = [] } = useQuery({ queryKey: ["admin.posts"], queryFn: () => listPosts() });
+  const { data: channels = [] } = useQuery({ queryKey: ["admin.channels"], queryFn: listChannels });
+  const { data: groups = [] } = useQuery({ queryKey: ["admin.groups"], queryFn: () => getState().chats.filter((c) => c.type === "group") });
   const { data: statuses = [] } = useQuery({ queryKey: ["admin.statuses"], queryFn: listActiveStatuses });
   const { data: boosts = [] } = useQuery({ queryKey: ["admin.boosts"], queryFn: listBoosts });
   const { data: audits = [] } = useQuery({ queryKey: ["admin.audits"], queryFn: listAuditLogs });
   const { data: reports = [] } = useQuery({ queryKey: ["admin.reports"], queryFn: listReports });
+
+  useEffect(() => subscribeToChannels(() => qc.invalidateQueries({ queryKey: ["admin.channels"] })), [qc]);
+  useEffect(() => subscribeToChats(() => qc.invalidateQueries({ queryKey: ["admin.groups"] })), [qc]);
+  useEffect(() => {
+    const unsub = subscribe("store:seeded", () => qc.invalidateQueries({ queryKey: ["admin.channels", "admin.groups"] }));
+    return unsub;
+  }, [qc]);
 
   const setSearch = (patch: Record<string, string>) => {
     nav({
@@ -154,7 +165,8 @@ function AdminPage() {
     { label: "Posts", value: stats?.posts || 0, icon: MessageCircle },
     { label: "Statuses", value: stats?.statuses || 0, icon: ImageIcon },
     { label: "Likes", value: stats?.likes || 0, icon: Heart },
-    { label: "Views", value: stats?.views || 0, icon: Eye },
+    { label: "Real Views", value: stats?.realViews || 0, icon: Eye },
+    { label: "Boosted Views", value: stats?.boostedViews || 0, icon: TrendingUp },
     { label: "Boosts", value: stats?.boosts || 0, icon: TrendingUp },
     { label: "Reports", value: stats?.reports || 0, icon: ShieldAlert },
   ];
@@ -163,9 +175,6 @@ function AdminPage() {
   const boClear = () => setSearch({ bo_user: "", bo_kind: "", bo_from: "", bo_to: "" });
   const auActive = !!(search.au_user || search.au_action || search.au_from || search.au_to);
   const boActive = !!(search.bo_user || search.bo_kind || search.bo_from || search.bo_to);
-
-  const groups = getState().chats.filter((c) => c.type === "group");
-  const channels = getState().channels;
 
   return (
     <FeatureBoundary name="admin">
@@ -364,8 +373,10 @@ function AdminPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Body</TableHead>
-                        <TableHead>Likes</TableHead>
-                        <TableHead>Views</TableHead>
+                        <TableHead>Real Likes</TableHead>
+                        <TableHead>Boosted Likes</TableHead>
+                        <TableHead>Real Views</TableHead>
+                        <TableHead>Boosted Views</TableHead>
                         <TableHead>Pinned</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
@@ -374,8 +385,10 @@ function AdminPage() {
                       {posts.map((p) => (
                         <TableRow key={p.id} className={p.pinned ? "bg-primary/5" : ""}>
                           <TableCell className="max-w-xs truncate">{p.body}</TableCell>
-                          <TableCell>{likeCount(p)}</TableCell>
-                          <TableCell>{viewCount(p)}</TableCell>
+                          <TableCell>{p.likes.length}</TableCell>
+                          <TableCell>{p.boostedLikes || 0}</TableCell>
+                          <TableCell>{p.views.length}</TableCell>
+                          <TableCell>{p.boostedViews || 0}</TableCell>
                           <TableCell>{p.pinned ? <Pin className="h-4 w-4 text-primary" /> : "—"}</TableCell>
                           <TableCell>
                             <div className="flex items-center justify-end gap-1.5 flex-wrap">

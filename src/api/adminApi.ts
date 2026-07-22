@@ -21,7 +21,11 @@ export async function overviewStats() {
     posts: s.channelPosts.length,
     statuses: s.statuses.length,
     likes: s.channelPosts.reduce((a, p) => a + p.likes.length + (p.boostedLikes || 0), 0),
+    realLikes: s.channelPosts.reduce((a, p) => a + p.likes.length, 0),
+    boostedLikes: s.channelPosts.reduce((a, p) => a + (p.boostedLikes || 0), 0),
     views: s.channelPosts.reduce((a, p) => a + p.views.length + (p.boostedViews || 0), 0),
+    realViews: s.channelPosts.reduce((a, p) => a + p.views.length, 0),
+    boostedViews: s.channelPosts.reduce((a, p) => a + (p.boostedViews || 0), 0),
     boosts: s.boosts.length,
     reports: s.reports.length,
   };
