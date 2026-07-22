@@ -164,16 +164,21 @@ function ChannelPage() {
           <p className="truncate text-xs text-muted-foreground">{channel?.memberIds.length} subscribers</p>
         </div>
         <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => setInfoOpen(true)}
+          className="shrink-0"
+          aria-label="Channel info"
+        >
+          <Info className="h-5 w-5" />
+        </Button>
+        <Button
           size="sm"
           variant={isSubscribed ? "outline" : "default"}
           onClick={handleSubscribe}
-          className="rounded-full shrink-0 gap-1"
+          className="rounded-full shrink-0"
         >
           {isSubscribed ? "Subscribed" : "Subscribe"}
-          <Info className="h-4 w-4" onClick={(e) => {
-            e.stopPropagation();
-            setInfoOpen(true);
-          }} />
         </Button>
       </header>
 

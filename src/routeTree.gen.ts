@@ -23,6 +23,8 @@ import { Route as AuthSignupRouteImport } from './routes/auth.signup'
 import { Route as AppChannelsChannelIdRouteImport } from './routes/_app.channels.$channelId'
 import { Route as AppChatsChatIdRouteImport } from './routes/_app.chats.$chatId'
 import { Route as AppGroupsGroupIdRouteImport } from './routes/_app.groups.$groupId'
+import { Route as ExploreChannelChannelIdRouteImport } from './routes/explore/channel.$channelId'
+import { Route as ExploreGroupGroupIdRouteImport } from './routes/explore/group.$groupId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -93,6 +95,16 @@ const AppGroupsGroupIdRoute = AppGroupsGroupIdRouteImport.update({
   path: '/$groupId',
   getParentRoute: () => AppGroupsRoute,
 } as any)
+const ExploreChannelChannelIdRoute = ExploreChannelChannelIdRouteImport.update({
+  id: '/explore/channel/$channelId',
+  path: '/explore/channel/$channelId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExploreGroupGroupIdRoute = ExploreGroupGroupIdRouteImport.update({
+  id: '/explore/group/$groupId',
+  path: '/explore/group/$groupId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -108,6 +120,8 @@ export interface FileRoutesByFullPath {
   '/channels/$channelId': typeof AppChannelsChannelIdRoute
   '/chats/$chatId': typeof AppChatsChatIdRoute
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
+  '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
+  '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -123,6 +137,8 @@ export interface FileRoutesByTo {
   '/channels/$channelId': typeof AppChannelsChannelIdRoute
   '/chats/$chatId': typeof AppChatsChatIdRoute
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
+  '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
+  '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -140,6 +156,8 @@ export interface FileRoutesById {
   '/_app/channels/$channelId': typeof AppChannelsChannelIdRoute
   '/_app/chats/$chatId': typeof AppChatsChatIdRoute
   '/_app/groups/$groupId': typeof AppGroupsGroupIdRoute
+  '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
+  '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -157,6 +175,8 @@ export interface FileRouteTypes {
     | '/channels/$channelId'
     | '/chats/$chatId'
     | '/groups/$groupId'
+    | '/explore/channel/$channelId'
+    | '/explore/group/$groupId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -172,6 +192,8 @@ export interface FileRouteTypes {
     | '/channels/$channelId'
     | '/chats/$chatId'
     | '/groups/$groupId'
+    | '/explore/channel/$channelId'
+    | '/explore/group/$groupId'
   id:
     | '__root__'
     | '/'
@@ -188,6 +210,8 @@ export interface FileRouteTypes {
     | '/_app/channels/$channelId'
     | '/_app/chats/$chatId'
     | '/_app/groups/$groupId'
+    | '/explore/channel/$channelId'
+    | '/explore/group/$groupId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -195,6 +219,8 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   AuthLoginRoute: typeof AuthLoginRoute
   AuthSignupRoute: typeof AuthSignupRoute
+  ExploreChannelChannelIdRoute: typeof ExploreChannelChannelIdRoute
+  ExploreGroupGroupIdRoute: typeof ExploreGroupGroupIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -297,6 +323,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppGroupsGroupIdRouteImport
       parentRoute: typeof AppGroupsRoute
     }
+    '/explore/channel/$channelId': {
+      id: '/explore/channel/$channelId'
+      path: '/explore/channel/$channelId'
+      fullPath: '/explore/channel/$channelId'
+      preLoaderRoute: typeof ExploreChannelChannelIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/explore/group/$groupId': {
+      id: '/explore/group/$groupId'
+      path: '/explore/group/$groupId'
+      fullPath: '/explore/group/$groupId'
+      preLoaderRoute: typeof ExploreGroupGroupIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -363,6 +403,8 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   AuthLoginRoute: AuthLoginRoute,
   AuthSignupRoute: AuthSignupRoute,
+  ExploreChannelChannelIdRoute: ExploreChannelChannelIdRoute,
+  ExploreGroupGroupIdRoute: ExploreGroupGroupIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Search, MoreVertical, X } from "lucide-react";
+import { ArrowLeft, Search, MoreVertical, X, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,9 @@ export function ChatView({ chatId }: { chatId: string }) {
   const [editText, setEditText] = useState("");
   const [search, setSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [shareLink, setShareLink] = useState("");
+  const [copied, setCopied] = useState(false);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [typing, setTyping] = useState<string | null>(null);
 
@@ -50,6 +53,19 @@ export function ChatView({ chatId }: { chatId: string }) {
     queryKey: ["messages", chatId],
     queryFn: () => listMessages(chatId),
   });
+
+  useEffect(() => {
+    if (!chat || typeof window === "undefined") return;
+    if (chat.type !== "group") return;
+    setShareLink(`${window.location.origin}/explore/group/${chat.id}`);
+  }, [chat]);
+
+  const copyShareLink = () => {
+    if (!shareLink) return;
+    navigator.clipboard.writeText(shareLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   // Get other user ID for DMs
   const otherUserId = useMemo(() => {
@@ -152,7 +168,15 @@ export function ChatView({ chatId }: { chatId: string }) {
         <Button variant="ghost" size="icon" onClick={() => setShowSearch((s) => !s)}>
           <Search className="h-5 w-5" />
         </Button>
-        <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5" /></Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => chat?.type === "group" && setInfoOpen(true)}
+          disabled={chat?.type !== "group"}
+          aria-label={chat?.type === "group" ? "Open group menu" : "More options"}
+        >
+          <MoreVertical className="h-5 w-5" />
+        </Button>
       </header>
       {showSearch && (
         <div className="absolute top-16 inset-x-0 z-20 shrink-0 border-b bg-card/95 backdrop-blur-md p-2">
@@ -216,6 +240,47 @@ export function ChatView({ chatId }: { chatId: string }) {
         )}
       </div>
 
+      {chat?.type === "group" && (
+        <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+          <DialogContent className="w-full h-full max-w-full sm:max-w-2xl sm:h-auto">
+            <DialogHeader>
+              <DialogTitle>{chat.name || "Group Info"}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-5 p-4">
+              <div className="rounded-3xl overflow-hidden bg-muted">
+                {chat.avatar ? (
+                  <img src={chat.avatar} alt="Group wallpaper" className="w-full h-56 object-cover" />
+                ) : (
+                  <div className="flex h-56 items-center justify-center bg-slate-200 text-muted-foreground">No wallpaper</div>
+                )}
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Members</p>
+                  <p className="text-lg font-semibold">{chat.memberIds.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Created</p>
+                  <p className="text-sm">{new Date(chat.createdAt).toLocaleDateString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Description</p>
+                  <p className="text-sm text-muted-foreground">{chat.name || "No name"}</p>
+                </div>
+              </div>
+              <div className="rounded-2xl border bg-background p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Share group link</p>
+                  <Button variant="ghost" size="icon" onClick={copyShareLink}>
+                    <Link2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground break-all">{shareLink}</p>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       <Composer
         value={draft}
         onChange={(v) => setDraft(chatId, v)}
