@@ -159,10 +159,28 @@ function ChatsPage() {
                   onClick={async () => {
                     setLoadingUserId(u.id);
                     try {
-                      const c = await getOrCreateDM(me.id, u.id);
+                      // Create optimistic local chat and navigate immediately
+                      const optimisticChat: typeof c = {
+                        id: `temp-${Date.now()}`,
+                        type: "dm" as const,
+                        memberIds: [me.id, u.id],
+                        createdAt: Date.now(),
+                      };
                       setNewChatOpen(false);
+                      nav({ to: "/chats/$chatId", params: { chatId: optimisticChat.id } });
                       setLoadingUserId(null);
-                      nav({ to: "/chats/$chatId", params: { chatId: c.id } });
+
+                      // Sync with backend in background, replace temp chat ID if created
+                      try {
+                        const c = await getOrCreateDM(me.id, u.id);
+                        if (optimisticChat.id !== c.id) {
+                          // Chat was created on backend, navigate to real ID
+                          nav({ to: "/chats/$chatId", params: { chatId: c.id }, replace: true });
+                        }
+                      } catch (syncError) {
+                        console.warn("Background sync error:", syncError);
+                        // Chat view will still show the temp chat
+                      }
                     } catch (error) {
                       setLoadingUserId(null);
                       const message = error instanceof Error ? error.message : "Failed to start chat";

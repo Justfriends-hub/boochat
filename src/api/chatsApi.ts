@@ -136,42 +136,43 @@ export async function getChat(id: string): Promise<Chat | undefined> {
 
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {
   const supabase = ensureSupabase();
-  const { data: userAChats, error: userAError } = await supabase
-    .from("chat_members")
-    .select("chat_id")
-    .eq("user_id", userA);
-  if (userAError) throw handleSupabaseError(userAError, "Failed to fetch user's chats");
-
-  const chatIds = (userAChats ?? []).map((row) => row.chat_id);
-  if (chatIds.length) {
-    const { data: sharedChats, error: sharedError } = await supabase
+  
+  // Try to find existing chat first
+  try {
+    const { data: userAChats, error: userAError } = await supabase
       .from("chat_members")
       .select("chat_id")
-      .in("chat_id", chatIds)
-      .eq("user_id", userB);
-    if (sharedError) throw handleSupabaseError(sharedError, "Failed to check for existing chat");
-
-    const sharedIds = (sharedChats ?? []).map((row) => row.chat_id);
-    if (sharedIds.length) {
-      const { data: chats, error: chatError } = await supabase
-        .from("chats")
-        .select("*")
-        .in("id", sharedIds)
-        .eq("type", "dm")
-        .limit(1);
-      if (chatError) throw handleSupabaseError(chatError, "Failed to fetch chat details");
-      if (chats?.length) {
-        const chat = chats[0];
-        const { data: memberRows, error: memberError } = await supabase
-          .from("chat_members")
-          .select("user_id")
-          .eq("chat_id", chat.id);
-        if (memberError) throw handleSupabaseError(memberError, "Failed to fetch chat members");
-        return mapChat(chat, (memberRows ?? []).map((row) => row.user_id), null);
+      .eq("user_id", userA);
+    if (!userAError && userAChats?.length) {
+      const chatIds = userAChats.map((row) => row.chat_id);
+      const { data: sharedChats, error: sharedError } = await supabase
+        .from("chat_members")
+        .select("chat_id")
+        .in("chat_id", chatIds)
+        .eq("user_id", userB);
+      if (!sharedError && sharedChats?.length) {
+        const sharedIds = sharedChats.map((row) => row.chat_id);
+        const { data: chats, error: chatError } = await supabase
+          .from("chats")
+          .select("*")
+          .in("id", sharedIds)
+          .eq("type", "dm")
+          .limit(1);
+        if (!chatError && chats?.length) {
+          const chat = chats[0];
+          const { data: memberRows } = await supabase
+            .from("chat_members")
+            .select("user_id")
+            .eq("chat_id", chat.id);
+          return mapChat(chat, (memberRows ?? []).map((row) => row.user_id), null);
+        }
       }
     }
+  } catch (checkError) {
+    console.warn("Error checking existing chats:", checkError);
   }
 
+  // Create new chat
   const { data: newChat, error: createChatError } = await supabase
     .from("chats")
     .insert([{ type: "dm" }])
