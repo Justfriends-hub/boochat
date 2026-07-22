@@ -84,15 +84,28 @@ CREATE POLICY "Chat members can update chats" ON chats
 **Policies needed:**
 
 ```sql
+-- Helper function used by chat_members RLS to avoid recursive policy evaluation
+CREATE OR REPLACE FUNCTION public.is_chat_member(_chat_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.chat_members
+    WHERE chat_id = _chat_id
+      AND user_id = auth.uid()
+  )
+$$;
+
 -- Allow users to view chat members for chats they're in
 DROP POLICY IF EXISTS "Users can view chat members" ON chat_members;
 CREATE POLICY "Users can view chat members" ON chat_members
   FOR SELECT
   USING (
-    chat_id IN (
-      SELECT chat_id FROM public.chat_members
-      WHERE user_id = auth.uid()
-    )
+    user_id = auth.uid() OR public.is_chat_member(chat_id)
   );
 
 -- Allow authenticated users to add themselves to chats

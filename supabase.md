@@ -351,13 +351,9 @@ create policy "chats update admin" on public.chats for update to authenticated u
 );
 
 create policy "chat_members select self" on public.chat_members for select to authenticated using (
-  user_id = auth.uid() or exists (
-    select 1 from public.chat_members m where m.chat_id = chat_members.chat_id and m.user_id = auth.uid()
-  )
+  user_id = auth.uid() or public.is_chat_member(chat_id)
 );
-create policy "chat_members insert self" on public.chat_members for insert to authenticated with check (user_id = auth.uid() or exists (
-  select 1 from public.chat_members m where m.chat_id = chat_members.chat_id and m.user_id = auth.uid()
-));
+create policy "chat_members insert self" on public.chat_members for insert to authenticated with check (auth.role() = 'authenticated');
 create policy "chat_members delete self" on public.chat_members for delete to authenticated using (user_id = auth.uid());
 
 -- messages: only members of the chat may read/write; sender may edit/delete
