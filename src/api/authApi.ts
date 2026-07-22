@@ -94,7 +94,8 @@ export async function signIn(email: string, password: string): Promise<User> {
   const supabase = ensureSupabase();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || !data.session) {
-    throw new Error(error?.message || "Unable to sign in.");
+    console.error("Supabase sign-in error:", error);
+    throw new Error(error?.message || JSON.stringify(error) || "Unable to sign in.");
   }
 
   await refreshCurrentUser(data.session.user.id);
@@ -119,7 +120,8 @@ export async function signUp(input: {
   });
 
   if (error) {
-    throw new Error(error.message);
+    console.error("Supabase sign-up error:", error);
+    throw new Error(error.message || JSON.stringify(error));
   }
 
   if (data.session?.user?.id) {
