@@ -115,7 +115,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="relative overflow-hidden"
+      className="relative flex flex-1 flex-col h-full min-h-0 overflow-hidden"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishDrag}
@@ -150,7 +150,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
         />
       </div>
       <div
-        className="min-h-full"
+        className="flex flex-1 flex-col h-full min-h-0"
         style={{
           transform: pullDistance ? `translateY(${pullDistance}px)` : undefined,
           transition: transitioning || refreshing ? "transform 220ms ease" : "none",

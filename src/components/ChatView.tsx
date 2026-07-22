@@ -55,14 +55,14 @@ export function ChatView({ chatId }: { chatId: string }) {
       qc.invalidateQueries({ queryKey: ["messages", chatId] });
       qc.invalidateQueries({ queryKey: ["chat", chatId] });
     });
-    return unsub;
+    return () => { unsub(); };
   }, [chatId, qc]);
 
   useEffect(() => {
     const unsub = subscribeToTyping(chatId, ({ userId, typing }) => {
       setTyping(typing ? userId : null);
     });
-    return unsub;
+    return () => { unsub(); };
   }, [chatId]);
 
   useEffect(() => {
@@ -125,7 +125,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden h-screen">
+    <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
       {/* Header */}
       <header className="flex h-16 items-center gap-3 border-b bg-card px-3 shrink-0">
         <Button variant="ghost" size="icon" onClick={() => router.history.back()} className="md:hidden">

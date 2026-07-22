@@ -18,6 +18,12 @@ export function AppNav() {
   const nav = [...items];
   if (user?.role === "admin") nav.push({ to: "/admin", label: "Admin", icon: ShieldCheck } as any);
 
+  const isDetailRoute = typeof pathname === "string" && (
+    (pathname.startsWith("/chats/") && pathname !== "/chats") ||
+    (pathname.startsWith("/channels/") && pathname !== "/channels") ||
+    (pathname.startsWith("/groups/") && pathname !== "/groups")
+  );
+
   return (
     <>
       {/* Desktop sidebar */}
@@ -52,31 +58,33 @@ export function AppNav() {
         </nav>
       </aside>
 
-      {/* Mobile bottom bar */}
-      <nav
-        aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-30 flex justify-around border-t bg-background/95 backdrop-blur md:hidden"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
-        {nav.map((it) => {
-          const active = pathname === it.to || (typeof pathname === "string" && pathname.startsWith(it.to + "/"));
-          return (
-            <Link
-              key={it.to}
-              to={it.to}
-              aria-label={it.label}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                active ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              <it.icon className={cn("h-5 w-5", active && "scale-110 transition-transform")} aria-hidden="true" />
-              {it.label}
-            </Link>
-          );
-        })}
-      </nav>
+      {/* Mobile bottom bar - hidden on detail pages */}
+      {!isDetailRoute && (
+        <nav
+          aria-label="Primary"
+          className="fixed inset-x-0 bottom-0 z-30 flex justify-around border-t bg-background/95 backdrop-blur md:hidden"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          {nav.map((it) => {
+            const active = pathname === it.to || (typeof pathname === "string" && pathname.startsWith(it.to + "/"));
+            return (
+              <Link
+                key={it.to}
+                to={it.to}
+                aria-label={it.label}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  active ? "text-primary" : "text-muted-foreground",
+                )}
+              >
+                <it.icon className={cn("h-5 w-5", active && "scale-110 transition-transform")} aria-hidden="true" />
+                {it.label}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
     </>
   );
 }

@@ -26,7 +26,7 @@ function GroupChat() {
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
 
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden">
+    <div className="relative flex flex-1 flex-col h-full min-h-0 overflow-hidden">
       <div className="absolute right-4 top-3 z-10">
         <Button variant="ghost" size="icon" onClick={() => setInfoOpen(true)}>
           <Info className="h-5 w-5" />

@@ -16,6 +16,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 
+import type { Chat, Message } from "@/lib/mockStore";
+
 export const Route = createFileRoute("/_app/chats")({
   component: ChatsPage,
   head: () => ({ meta: [{ title: "Chats — Meshly" }] }),
@@ -56,21 +58,21 @@ function ChatsPage() {
   if (isChatDetailRoute) {
     return (
       <FeatureBoundary name="chats">
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
           <Outlet />
         </div>
       </FeatureBoundary>
     );
   }
 
-  const rows = useMemo(() => {
+  const rows: Array<{ chat: Chat; name?: string; avatar?: string; online?: boolean; last?: Message; unread: number }> = useMemo(() => {
     return chats
       .map((c) => {
         const other = c.type === "dm" ? users.find((u) => u.id === c.memberIds.find((x) => x !== me.id)) : null;
         const name = c.type === "group" ? c.name : other?.displayName || "Chat";
         const avatar = c.type === "group" ? c.avatar : other?.avatar;
         const online = other?.online;
-        const last = undefined;
+        const last: Message | undefined = undefined;
         const unread = 0;
         return { chat: c, name, avatar, online, last, unread };
       })
@@ -79,7 +81,7 @@ function ChatsPage() {
 
   return (
     <FeatureBoundary name="chats">
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
         <header className="flex h-16 items-center justify-between border-b bg-card px-4">
           <h1 className="text-xl font-semibold">Chats</h1>
           <Button size="icon" variant="ghost" onClick={() => setNewChatOpen(true)}>
@@ -160,7 +162,7 @@ function ChatsPage() {
                     setLoadingUserId(u.id);
                     try {
                       // Create optimistic local chat and navigate immediately
-                      const optimisticChat: typeof c = {
+                      const optimisticChat: Chat = {
                         id: `temp-${Date.now()}`,
                         type: "dm" as const,
                         memberIds: [me.id, u.id],

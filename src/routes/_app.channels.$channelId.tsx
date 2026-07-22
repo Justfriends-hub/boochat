@@ -54,7 +54,7 @@ function ChannelPage() {
   };
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden" style={{ height: "100dvh" }}>
+    <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
       <header className="flex h-16 items-center gap-3 border-b bg-card px-3">
         <Button variant="ghost" size="icon" onClick={() => router.history.back()}>
           <ArrowLeft className="h-5 w-5" />
