@@ -34,15 +34,15 @@ import {
 } from "lucide-react";
 
 const searchSchema = z.object({
-  tab: fallback(z.string(), "users").default("users"),
-  au_user: fallback(z.string(), "").default(""),
-  au_action: fallback(z.string(), "").default(""),
-  au_from: fallback(z.string(), "").default(""),
-  au_to: fallback(z.string(), "").default(""),
-  bo_user: fallback(z.string(), "").default(""),
-  bo_kind: fallback(z.string(), "").default(""),
-  bo_from: fallback(z.string(), "").default(""),
-  bo_to: fallback(z.string(), "").default(""),
+  tab: z.string().default("users"),
+  au_user: z.string().default(""),
+  au_action: z.string().default(""),
+  au_from: z.string().default(""),
+  au_to: z.string().default(""),
+  bo_user: z.string().default(""),
+  bo_kind: z.string().default(""),
+  bo_from: z.string().default(""),
+  bo_to: z.string().default(""),
 });
 
 export const Route = createFileRoute("/_app/admin")({
