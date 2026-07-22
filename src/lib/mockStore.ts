@@ -28,7 +28,7 @@ export type Message = {
   deletedAt?: number;
   replyTo?: string;
   forwardedFrom?: string;
-  status: "sent" | "delivered" | "read";
+  status: "pending" | "sent" | "delivered" | "read";
 };
 
 export type Chat = {

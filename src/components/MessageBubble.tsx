@@ -1,4 +1,4 @@
-import { Check, CheckCheck, Play, Pencil, Trash2, Reply, Forward } from "lucide-react";
+import { Check, CheckCheck, Play, Pencil, Trash2, Reply, Forward, Clock } from "lucide-react";
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from "@/components/ui/context-menu";
@@ -76,7 +76,8 @@ export function MessageBubble({
               {m.editedAt && !deleted && <span>edited</span>}
               <span>{formatTime(m.createdAt)}</span>
               {isMine && !deleted && (
-                m.status === "read" ? <CheckCheck className="h-3.5 w-3.5 text-sky-300" />
+                m.status === "pending" ? <Clock className="h-3.5 w-3.5 opacity-70 animate-pulse" />
+                : m.status === "read" ? <CheckCheck className="h-3.5 w-3.5 text-sky-300" />
                 : m.status === "delivered" ? <CheckCheck className="h-3.5 w-3.5" />
                 : <Check className="h-3.5 w-3.5" />
               )}

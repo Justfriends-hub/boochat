@@ -1,5 +1,14 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import type { Message, MessageKind } from "@/lib/mockStore";
+import {
+  getCachedMessages,
+  setCachedMessages,
+  saveLocalMessage,
+  addToOutbox,
+  getOutbox,
+  removeFromOutbox,
+} from "@/lib/offlineStore";
+import { publish } from "@/lib/eventBus";
 
 function mapMessage(row: any): Message {
   const createdAt = new Date(row.created_at).getTime();
@@ -28,43 +37,153 @@ function handleSupabaseError(error: any, context: string): Error {
   return new Error(error?.message || context);
 }
 
+// Fetch messages with instant offline cache fallback
 export async function listMessages(chatId: string): Promise<Message[]> {
-  const supabase = ensureSupabase();
-  const { data, error } = await supabase
-    .from("messages")
-    .select("*")
-    .eq("chat_id", chatId)
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map(mapMessage);
+  const cached = getCachedMessages(chatId);
+
+  // Background fetch to refresh local cache
+  if (typeof window !== "undefined" && navigator.onLine) {
+    try {
+      const supabase = ensureSupabase();
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("chat_id", chatId)
+        .order("created_at", { ascending: true });
+
+      if (!error && data) {
+        const remoteMsgs = data.map(mapMessage);
+        setCachedMessages(chatId, remoteMsgs);
+        return getCachedMessages(chatId);
+      }
+    } catch (err) {
+      console.warn("Network fetch failed, serving from offline cache:", err);
+    }
+  }
+
+  return cached;
 }
 
+// Optimistic & Offline-first Message Dispatch
 export async function sendMessage(input: {
-  chatId: string; senderId: string; kind: MessageKind; body: string;
-  duration?: number; replyTo?: string; forwardedFrom?: string;
+  chatId: string;
+  senderId: string;
+  kind: MessageKind;
+  body: string;
+  duration?: number;
+  replyTo?: string;
+  forwardedFrom?: string;
 }): Promise<Message> {
-  const supabase = ensureSupabase();
-  const insert = {
-    chat_id: input.chatId,
-    sender_id: input.senderId,
+  const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const pendingMsg: Message = {
+    id: tempId,
+    chatId: input.chatId,
+    senderId: input.senderId,
     kind: input.kind,
     body: input.body,
     duration: input.duration,
-    reply_to: input.replyTo,
-    forwarded_from: input.forwardedFrom,
+    replyTo: input.replyTo,
+    forwardedFrom: input.forwardedFrom,
+    createdAt: Date.now(),
+    status: "pending",
   };
 
-  const { data, error } = await supabase
-    .from("messages")
-    .insert([insert])
-    .select()
-    .single();
-  if (error || !data) {
-    throw handleSupabaseError(error, "Failed to send message. Check RLS policies on the 'messages' table.");
+  // 1. Immediately store locally and render in UI (0ms delay)
+  saveLocalMessage(pendingMsg);
+  publish(`chat:${input.chatId}`);
+
+  // 2. If offline, queue in outbox and return pending message
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    addToOutbox(pendingMsg);
+    return pendingMsg;
   }
 
-  await supabase.from("chats").update({ updated_at: new Date().toISOString() }).eq("id", input.chatId);
-  return mapMessage(data);
+  // 3. Send to Supabase
+  try {
+    const supabase = ensureSupabase();
+    const insert = {
+      chat_id: input.chatId,
+      sender_id: input.senderId,
+      kind: input.kind,
+      body: input.body,
+      duration: input.duration,
+      reply_to: input.replyTo,
+      forwarded_from: input.forwardedFrom,
+    };
+
+    const { data, error } = await supabase
+      .from("messages")
+      .insert([insert])
+      .select()
+      .single();
+
+    if (error || !data) {
+      // If network/RLS error occurs, queue in outbox for retry
+      addToOutbox(pendingMsg);
+      return pendingMsg;
+    }
+
+    const sentMsg = mapMessage(data);
+    
+    // Replace pending message with confirmed sent message
+    saveLocalMessage(sentMsg);
+    removeFromOutbox(tempId);
+    
+    await supabase.from("chats").update({ updated_at: new Date().toISOString() }).eq("id", input.chatId);
+    publish(`chat:${input.chatId}`);
+    return sentMsg;
+  } catch (err) {
+    console.warn("Failed to send message online, queued in outbox:", err);
+    addToOutbox(pendingMsg);
+    return pendingMsg;
+  }
+}
+
+// Background sync for queued outbox messages when network reconnects
+export async function syncPendingMessages() {
+  if (typeof window === "undefined" || !navigator.onLine) return;
+  const outbox = getOutbox();
+  if (!outbox.length) return;
+
+  const supabase = ensureSupabase();
+
+  for (const pendingMsg of outbox) {
+    try {
+      const insert = {
+        chat_id: pendingMsg.chatId,
+        sender_id: pendingMsg.senderId,
+        kind: pendingMsg.kind,
+        body: pendingMsg.body,
+        duration: pendingMsg.duration,
+        reply_to: pendingMsg.replyTo,
+        forwarded_from: pendingMsg.forwardedFrom,
+      };
+
+      const { data, error } = await supabase
+        .from("messages")
+        .insert([insert])
+        .select()
+        .single();
+
+      if (!error && data) {
+        const sentMsg = mapMessage(data);
+        saveLocalMessage(sentMsg);
+        removeFromOutbox(pendingMsg.id);
+        publish(`chat:${pendingMsg.chatId}`);
+      }
+    } catch (err) {
+      console.warn("Failed syncing pending message:", err);
+    }
+  }
+}
+
+// Auto-register online sync listener
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    syncPendingMessages();
+  });
+  // Trigger initial sync attempt on startup
+  setTimeout(() => syncPendingMessages(), 1000);
 }
 
 export async function editMessage(id: string, body: string) {
@@ -104,21 +223,29 @@ export async function forwardMessage(id: string, toChatId: string, senderId: str
 }
 
 export async function markChatRead(chatId: string, userId: string) {
-  const supabase = ensureSupabase();
-  const { error } = await supabase.rpc("mark_messages_read", { _chat_id: chatId });
-  if (error) throw new Error(error.message);
+  if (typeof window !== "undefined" && !navigator.onLine) return;
+  try {
+    const supabase = ensureSupabase();
+    const { error } = await supabase.rpc("mark_messages_read", { _chat_id: chatId });
+    if (error) console.warn("mark_messages_read error:", error.message);
+  } catch {}
 }
 
 export function subscribeToChat(chatId: string, cb: () => void) {
-  const supabase = ensureSupabase();
-  const channel = supabase.channel(`chat:${chatId}`);
-  channel.on(
-    "postgres_changes",
-    { event: "*", schema: "public", table: "messages", filter: `chat_id=eq.${chatId}` },
-    () => cb(),
-  );
-  channel.subscribe();
-  return () => channel.unsubscribe();
+  if (typeof window !== "undefined" && !navigator.onLine) return () => undefined;
+  try {
+    const supabase = ensureSupabase();
+    const channel = supabase.channel(`chat:${chatId}`);
+    channel.on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "messages", filter: `chat_id=eq.${chatId}` },
+      () => cb(),
+    );
+    channel.subscribe();
+    return () => channel.unsubscribe();
+  } catch {
+    return () => undefined;
+  }
 }
 
 export function subscribeToTyping(_chatId: string, _cb: (p: { userId: string; typing: boolean }) => void) {
