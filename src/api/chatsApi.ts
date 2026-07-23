@@ -31,6 +31,11 @@ function handleSupabaseError(error: any, context: string): Error {
   return new Error(error?.message || context);
 }
 
+function isVisibilitySchemaError(error: any) {
+  const message = `${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
+  return message.includes("column") && message.includes("does not exist");
+}
+
 async function fetchChatMembers(chatIds: string[]) {
   try {
     const supabase = ensureSupabase();
@@ -76,7 +81,10 @@ export async function listChats(userId: string): Promise<Chat[]> {
               .filter((row) => row.chat_id === chatRow.id)
               .map((row) => row.user_id);
             const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
-            return mapChat(chatRow, members, group);
+            const cached = getState().chats.find((c) => c.id === chatRow.id);
+            const remoteChat = mapChat(chatRow, members, group);
+            if (cached?.visibility) remoteChat.visibility = cached.visibility;
+            return remoteChat;
           });
 
           setState((s) => { s.chats = remoteChats; });
@@ -115,6 +123,8 @@ export async function getChat(id: string): Promise<Chat | undefined> {
         group = groupRow ?? null;
       }
       const remoteChat = mapChat(chatRow, members, group);
+      const cached = getState().chats.find((c) => c.id === id);
+      if (cached?.visibility) remoteChat.visibility = cached.visibility;
       setState((s) => {
         const idx = s.chats.findIndex((c) => c.id === id);
         if (idx >= 0) s.chats[idx] = remoteChat;
@@ -204,10 +214,6 @@ export async function createGroup(input: {
     avatar_url: input.avatar,
     owner_id: input.ownerId,
   };
-  if (visibility) {
-    groupInsert.visibility = visibility;
-    groupInsert.is_public = visibility === "public";
-  }
 
   const { data: groupRow, error: createGroupError } = await supabase
     .from("groups")
@@ -250,12 +256,22 @@ export async function updateChat(id: string, patch: Partial<Chat>) {
       groupUpdate.only_admins_post = patch.permissions.onlyAdminsPost;
       groupUpdate.only_admins_add = patch.permissions.onlyAdminsAdd;
     }
-    if (patch.visibility !== undefined) {
-      groupUpdate.visibility = patch.visibility;
-      groupUpdate.is_public = patch.visibility === "public";
+
+    try {
+      if (Object.keys(groupUpdate).length > 0) {
+        const { error } = await supabase.from("groups").update(groupUpdate).eq("chat_id", id);
+        if (error) throw error;
+      }
+    } catch (error: any) {
+      throw new Error(error.message || "Unable to update group settings.");
     }
-    const { error } = await supabase.from("groups").update(groupUpdate).eq("chat_id", id);
-    if (error) throw new Error(error.message);
+
+    if (patch.visibility !== undefined) {
+      setState((s) => {
+        const chat = s.chats.find((c) => c.id === id);
+        if (chat) chat.visibility = patch.visibility;
+      });
+    }
   }
 
   publish("chats:changed");

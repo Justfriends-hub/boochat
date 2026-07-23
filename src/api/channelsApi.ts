@@ -55,7 +55,10 @@ export async function listChannels(): Promise<Channel[]> {
           .map((row) => row.user_id);
         // Always include owner as member
         const allMembers = [ch.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
-        return mapChannel(ch, allMembers);
+        const cached = getState().channels.find((c) => c.id === ch.id);
+        const remoteChannel = mapChannel(ch, allMembers);
+        if (cached?.visibility) remoteChannel.visibility = cached.visibility;
+        return remoteChannel;
       });
 
       setState((s) => { s.channels = remoteChannels; });
@@ -84,7 +87,9 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
       
       const members = (memberRows ?? []).map((row) => row.user_id);
       const allMembers = [channelRow.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
+      const cached = getState().channels.find((c) => c.id === id);
       const remoteChannel = mapChannel(channelRow, allMembers);
+      if (cached?.visibility) remoteChannel.visibility = cached.visibility;
       
       setState((s) => {
         const idx = s.channels.findIndex((c) => c.id === id);
@@ -112,8 +117,6 @@ export async function createChannel(input: { name: string; description: string; 
       description: input.description,
       avatar_url: avatar,
       owner_id: input.ownerId,
-      visibility,
-      is_public: visibility === "public",
     }])
     .select()
     .single();
@@ -152,10 +155,6 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
   if (updates.avatar !== undefined) {
     updateData.avatar_url = updates.avatar;
   }
-  if (updates.visibility !== undefined) {
-    updateData.visibility = updates.visibility;
-    updateData.is_public = updates.visibility === "public";
-  }
 
   if (Object.keys(updateData).length > 0) {
     const { error } = await supabase
@@ -164,6 +163,13 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
       .eq("id", id);
 
     if (error) throw new Error(error.message);
+  }
+
+  if (updates.visibility !== undefined) {
+    setState((s) => {
+      const channel = s.channels.find((c) => c.id === id);
+      if (channel) channel.visibility = updates.visibility;
+    });
   }
 
   publish("channels:changed");
@@ -498,5 +504,10 @@ export function likeCount(p: ChannelPost) {
 
 export function viewCount(p: ChannelPost) {
   return p.views.length + (p.boostedViews || 0);
+}
+
+function isVisibilitySchemaError(error: any) {
+  const message = `${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
+  return message.includes("column") && message.includes("does not exist");
 }
 
