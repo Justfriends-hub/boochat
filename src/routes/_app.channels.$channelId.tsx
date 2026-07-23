@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 export const Route = createFileRoute("/_app/channels/$channelId")({
   component: ChannelPage,
@@ -42,6 +43,7 @@ function ChannelPage() {
   const [wallpaperUrl, setWallpaperUrl] = useState("");
   const [shareLink, setShareLink] = useState("");
   const [copied, setCopied] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
 
@@ -59,22 +61,40 @@ function ChannelPage() {
   }, [posts, sessionId]);
 
   useEffect(() => {
-    // Generate share link
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-    setShareLink(`${baseUrl}/join/${channelId}`);
-  }, [channelId]);
+    setShareLink(channel?.visibility === "private" ? "" : `${baseUrl}/join/${channelId}`);
+  }, [channelId, channel?.visibility]);
 
-  const isSuperAdmin = me.role === "admin";
+  const isSuperAdmin = me.role === "admin" || me.role === "superadmin";
   const isOwner = channel?.ownerId === me.id;
   const isAdmin = channel?.adminIds?.includes(me.id);
   const canPost = isSuperAdmin || isOwner || isAdmin;
+  const canManageVisibility = isSuperAdmin || isOwner;
   const isSubscribed = channel?.memberIds.includes(me.id);
+  const isPrivateChannel = channel?.visibility === "private";
+  const isApprovedMember = !!channel && channel.memberIds.includes(me.id);
+  const canViewChannel = !isPrivateChannel || isApprovedMember || canManageVisibility;
 
   const handleSubscribe = async () => {
     if (!channel) return;
     await toggleChannelSubscribe(channel.id, me.id);
     qc.invalidateQueries({ queryKey: ["channel", channelId] });
     toast.success(isSubscribed ? "Unsubscribed from channel" : "Subscribed to channel!");
+  };
+
+  const handleToggleVisibility = async () => {
+    if (!channel || !canManageVisibility) return;
+    const next = channel.visibility === "private" ? "public" : "private";
+    setPrivacyBusy(true);
+    try {
+      await updateChannel(channel.id, { visibility: next });
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      toast.success(`Channel is now ${next}.`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update visibility");
+    } finally {
+      setPrivacyBusy(false);
+    }
   };
 
   const handleCreatePost = async () => {
@@ -148,6 +168,27 @@ function ChannelPage() {
     );
     togglePostLike(post.id, me.id);
   };
+
+  if (!channel) {
+    return null;
+  }
+
+  if (isPrivateChannel && !canViewChannel) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-muted/20 p-6">
+        <div className="max-w-md rounded-3xl border bg-card p-6 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Lock className="h-5 w-5" />
+          </div>
+          <h2 className="text-xl font-semibold">Private channel</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            This channel is hidden until the owner or admin approves your membership.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">You cannot see posts or comment until you are accepted.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
@@ -324,27 +365,46 @@ function ChannelPage() {
                   </div>
                 </div>
 
-                {/* Share Link Section */}
-                <div className="space-y-2 p-3 rounded-lg bg-muted/50">
-                  <p className="text-xs font-semibold uppercase text-muted-foreground">Share Channel</p>
-                  <p className="text-xs text-muted-foreground">Anyone with this link can preview this channel</p>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={shareLink}
-                      readOnly
-                      className="flex-1 text-sm px-2 py-1.5 rounded bg-background border border-input"
+                {/* Visibility Section */}
+                <div className="space-y-3 rounded-lg border bg-muted/40 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-muted-foreground">Visibility</p>
+                      <p className="text-sm text-muted-foreground">
+                        {channel.visibility === "private" ? "Private channel" : "Public channel"}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={channel.visibility !== "private"}
+                      onCheckedChange={handleToggleVisibility}
+                      disabled={!canManageVisibility || privacyBusy}
                     />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={copyShareLink}
-                      className="gap-1"
-                    >
-                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    </Button>
                   </div>
                 </div>
+
+                {/* Share Link Section */}
+                {channel.visibility !== "private" && (
+                  <div className="space-y-2 p-3 rounded-lg bg-muted/50">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Share Channel</p>
+                    <p className="text-xs text-muted-foreground">Anyone with this link can preview this channel</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={shareLink}
+                        readOnly
+                        className="flex-1 text-sm px-2 py-1.5 rounded bg-background border border-input"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={copyShareLink}
+                        className="gap-1"
+                      >
+                        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

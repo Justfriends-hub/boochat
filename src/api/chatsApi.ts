@@ -3,6 +3,7 @@ import { publish } from "@/lib/eventBus";
 import { getState, setState, type Chat } from "@/lib/mockStore";
 
 function mapChat(chat: any, members: string[], group: any | null): Chat {
+  const visibility = chat.visibility ?? (chat.is_public === false ? "private" : "public");
   const base: Chat = {
     id: chat.id,
     type: chat.type,
@@ -16,6 +17,7 @@ function mapChat(chat: any, members: string[], group: any | null): Chat {
       onlyAdminsPost: group.only_admins_post,
       onlyAdminsAdd: group.only_admins_add,
     } : undefined,
+    visibility,
   };
   return base;
 }
@@ -183,8 +185,10 @@ export async function createGroup(input: {
   memberIds: string[];
   ownerId: string;
   avatar?: string;
+  visibility?: "public" | "private";
 }): Promise<Chat> {
   const supabase = ensureSupabase();
+  const visibility = input.visibility ?? "public";
   const { data: newChat, error: createChatError } = await supabase.rpc("create_chat", {
     _type: "group",
     _name: input.name,
@@ -194,16 +198,20 @@ export async function createGroup(input: {
     throw handleSupabaseError(createChatError, "Failed to create group. Check RLS policies on the 'chats' table.");
   }
 
+  const groupInsert: Record<string, any> = {
+    chat_id: newChat.id,
+    name: input.name,
+    avatar_url: input.avatar,
+    owner_id: input.ownerId,
+  };
+  if (visibility) {
+    groupInsert.visibility = visibility;
+    groupInsert.is_public = visibility === "public";
+  }
+
   const { data: groupRow, error: createGroupError } = await supabase
     .from("groups")
-    .insert([
-      {
-        chat_id: newChat.id,
-        name: input.name,
-        avatar_url: input.avatar,
-        owner_id: input.ownerId,
-      },
-    ])
+    .insert([groupInsert])
     .select()
     .single();
   if (createGroupError || !groupRow) {
@@ -221,7 +229,7 @@ export async function createGroup(input: {
   }
 
   publish("chats:changed");
-  return mapChat(newChat, members, groupRow);
+  return mapChat(newChat, members, { ...groupRow, visibility });
 }
 
 export async function updateChat(id: string, patch: Partial<Chat>) {
@@ -235,12 +243,16 @@ export async function updateChat(id: string, patch: Partial<Chat>) {
     if (error) throw new Error(error.message);
   }
 
-  if (patch.ownerId !== undefined || patch.permissions !== undefined) {
+  if (patch.ownerId !== undefined || patch.permissions !== undefined || patch.visibility !== undefined) {
     const groupUpdate: Record<string, any> = {};
     if (patch.ownerId !== undefined) groupUpdate.owner_id = patch.ownerId;
     if (patch.permissions !== undefined) {
       groupUpdate.only_admins_post = patch.permissions.onlyAdminsPost;
       groupUpdate.only_admins_add = patch.permissions.onlyAdminsAdd;
+    }
+    if (patch.visibility !== undefined) {
+      groupUpdate.visibility = patch.visibility;
+      groupUpdate.is_public = patch.visibility === "public";
     }
     const { error } = await supabase.from("groups").update(groupUpdate).eq("chat_id", id);
     if (error) throw new Error(error.message);

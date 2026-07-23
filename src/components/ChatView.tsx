@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Search, MoreVertical, X, Link2 } from "lucide-react";
+import { ArrowLeft, Search, MoreVertical, X, Link2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -17,13 +17,15 @@ import {
   listMessages, sendMessage, editMessage, deleteMessage, forwardMessage,
   subscribeToChat, subscribeToTyping, markChatRead,
 } from "@/api/messagesApi";
-import { listChats, getChat } from "@/api/chatsApi";
+import { listChats, getChat, updateChat } from "@/api/chatsApi";
 import { listUsers, getUser } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import { useUIStore } from "@/stores/uiStore";
 import { formatDay } from "@/lib/format";
 import type { Message, Chat } from "@/lib/mockStore";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 
 export function ChatView({ chatId }: { chatId: string }) {
   const me = useAuth();
@@ -43,6 +45,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   const [copied, setCopied] = useState(false);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [typing, setTyping] = useState<string | null>(null);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
 
   const { data: chat } = useQuery({
     queryKey: ["chat", chatId],
@@ -57,7 +60,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   useEffect(() => {
     if (!chat || typeof window === "undefined") return;
     if (chat.type !== "group") return;
-    setShareLink(`${window.location.origin}/join/${chat.id}`);
+    setShareLink(chat.visibility === "private" ? "" : `${window.location.origin}/join/${chat.id}`);
   }, [chat]);
 
   const copyShareLink = () => {
@@ -140,10 +143,47 @@ export function ChatView({ chatId }: { chatId: string }) {
     clearDraft(chatId);
   };
 
+  const canManageVisibility = (me?.role === "admin" || me?.role === "superadmin") || me?.id === chat?.ownerId;
+  const isPrivateGroup = chat?.type === "group" && chat.visibility === "private";
+  const isApprovedMember = !!chat && !!me && chat.memberIds.includes(me.id);
+
+  const toggleVisibility = async () => {
+    if (!chat || !canManageVisibility) return;
+    const next = chat.visibility === "private" ? "public" : "private";
+    setPrivacyBusy(true);
+    try {
+      await updateChat(chat.id, { visibility: next });
+      qc.invalidateQueries({ queryKey: ["chat", chat.id] });
+      toast.success(`Group is now ${next}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to update group visibility.";
+      toast.error(message);
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
+
   if (!chat || !me) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground">
         Loading…
+      </div>
+    );
+  }
+
+  if (isPrivateGroup && !isApprovedMember && !canManageVisibility) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-muted/20 p-6">
+        <div className="max-w-md rounded-3xl border bg-card p-6 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Lock className="h-5 w-5" />
+          </div>
+          <h2 className="text-xl font-semibold">Private group</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            This group is hidden until the owner or admin approves your membership.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">You cannot see the conversation or post inside it yet.</p>
+        </div>
       </div>
     );
   }
@@ -270,13 +310,30 @@ export function ChatView({ chatId }: { chatId: string }) {
               </div>
               <div className="rounded-2xl border bg-background p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase text-muted-foreground">Share group link</p>
-                  <Button variant="ghost" size="icon" onClick={copyShareLink}>
-                    <Link2 className="h-4 w-4" />
-                  </Button>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Visibility</p>
+                    <p className="text-sm text-muted-foreground">
+                      {chat.visibility === "private" ? "Private group" : "Public group"}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={chat.visibility !== "private"}
+                    onCheckedChange={() => toggleVisibility()}
+                    disabled={privacyBusy || !canManageVisibility}
+                  />
                 </div>
-                <p className="mt-2 text-sm text-muted-foreground break-all">{shareLink}</p>
               </div>
+              {chat.visibility !== "private" && (
+                <div className="rounded-2xl border bg-background p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Share group link</p>
+                    <Button variant="ghost" size="icon" onClick={copyShareLink} disabled={!shareLink}>
+                      <Link2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground break-all">{shareLink || "Enable public sharing to generate a preview link."}</p>
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>

@@ -3,6 +3,7 @@ import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase } from "@/lib/supabaseClient";
 
 function mapChannel(row: any, members: string[]): Channel {
+  const visibility = row.visibility ?? (row.is_public === false ? "private" : "public");
   return {
     id: row.id,
     name: row.name,
@@ -13,6 +14,7 @@ function mapChannel(row: any, members: string[]): Channel {
     memberIds: members,
     onlyAdminsPost: true, // Default behavior
     createdAt: new Date(row.created_at).getTime(),
+    visibility,
   };
 }
 
@@ -97,8 +99,9 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
   return getState().channels.find((c) => c.id === id);
 }
 
-export async function createChannel(input: { name: string; description: string; ownerId: string; onlyAdminsPost?: boolean }) {
+export async function createChannel(input: { name: string; description: string; ownerId: string; onlyAdminsPost?: boolean; visibility?: "public" | "private" }) {
   const supabase = ensureSupabase();
+  const visibility = input.visibility ?? "public";
   
   const avatar = `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(input.name)}`;
   
@@ -109,6 +112,8 @@ export async function createChannel(input: { name: string; description: string; 
       description: input.description,
       avatar_url: avatar,
       owner_id: input.ownerId,
+      visibility,
+      is_public: visibility === "public",
     }])
     .select()
     .single();
@@ -126,12 +131,12 @@ export async function createChannel(input: { name: string; description: string; 
     console.warn("Failed to add owner as member:", memberError);
   }
 
-  const ch = mapChannel(channelRow, [input.ownerId]);
+  const ch = mapChannel({ ...channelRow, visibility }, [input.ownerId]);
   publish("channels:changed");
   return ch;
 }
 
-export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[]; name?: string; description?: string; avatar?: string; }) {
+export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[]; name?: string; description?: string; avatar?: string; visibility?: "public" | "private" }) {
   const supabase = ensureSupabase();
   
   const updateData: any = {};
@@ -146,6 +151,10 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
   }
   if (updates.avatar !== undefined) {
     updateData.avatar_url = updates.avatar;
+  }
+  if (updates.visibility !== undefined) {
+    updateData.visibility = updates.visibility;
+    updateData.is_public = updates.visibility === "public";
   }
 
   if (Object.keys(updateData).length > 0) {

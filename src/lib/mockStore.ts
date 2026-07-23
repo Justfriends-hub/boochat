@@ -32,6 +32,8 @@ export type Message = {
   status: "pending" | "sent" | "delivered" | "read";
 };
 
+export type Visibility = "public" | "private";
+
 export type Chat = {
   id: string;
   type: "dm" | "group";
@@ -44,6 +46,7 @@ export type Chat = {
   ownerId?: string;
   admins?: string[];
   permissions?: { onlyAdminsPost: boolean; onlyAdminsAdd: boolean };
+  visibility?: Visibility;
 };
 
 export type Status = {
@@ -67,6 +70,7 @@ export type Channel = {
   memberIds: string[];
   onlyAdminsPost: boolean;
   createdAt: number;
+  visibility?: Visibility;
 };
 export type ChannelPost = {
   id: string;
