@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { AppNav } from "@/components/AppNav";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { useAuth, useAuthReady } from "@/hooks/useAuth";
-import { initStore } from "@/lib/mockStore";
+import { initStore, getState } from "@/lib/mockStore";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +27,14 @@ function AppLayout() {
   // initStore still ensures seeding; the store is loaded synchronously at module
   // initialization so we can render a cached snapshot immediately.
   useEffect(() => { initStore(); }, []);
+  // Persist last viewed pathname so cached snapshot better reflects user's last screen
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && typeof pathname === "string") {
+        localStorage.setItem("chatapp.lastpath.v1", pathname);
+      }
+    } catch {}
+  }, [pathname]);
   useEffect(() => {
     if (!ready || typeof window === "undefined") return;
     if (!me) nav({ to: "/auth/login" });
