@@ -143,7 +143,9 @@ const empty: Store = {
   boosts: [], reports: [], auditLogs: [], session: null,
 };
 
-let state: Store = empty;
+// Initialize state from localStorage immediately so the UI can render a cached
+// snapshot synchronously on first paint while the app bootstraps.
+let state: Store = (typeof window !== "undefined") ? load() : empty;
 
 function load(): Store {
   if (typeof window === "undefined") return empty;
@@ -170,7 +172,6 @@ export function setState(mutator: (s: Store) => void) {
 
 export function initStore() {
   if (typeof window === "undefined") return;
-  state = load();
   // Seed if empty
   if (state.users.length === 0) {
     import("./seed").then(({ seed }) => {

@@ -53,14 +53,58 @@ export async function initializeAuth() {
         publishAuthChange();
       }
 
-      client.auth.onAuthStateChange(async (_event, session) => {
-        if (session?.user?.id) {
-          await refreshCurrentUser(session.user.id);
-        } else {
-          cachedUser = null;
-          publishAuthChange();
+        // Mark profile online when we have an active session and subscribe to profile changes
+        if (sessionData.session?.user?.id) {
+          try {
+            // Attempt to mark the profile as online (best-effort)
+            await client.from("profiles").update({ online: true }).eq("id", sessionData.session.user.id);
+          } catch (err) {
+            // ignore
+          }
+
+          // Subscribe to postgres changes for this profile so online state updates propagate
+          try {
+            const presenceChannel = client.channel(`profile:${sessionData.session.user.id}`);
+            presenceChannel.on(
+              "postgres_changes",
+              { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${sessionData.session.user.id}` },
+              (payload) => {
+                try {
+                  const newProfile = payload.new as any;
+                  if (cachedUser && newProfile && newProfile.id === cachedUser.id) {
+                    cachedUser = toUser(newProfile);
+                    publishAuthChange();
+                  }
+                } catch (e) {}
+              },
+            );
+            presenceChannel.subscribe();
+
+            if (typeof window !== "undefined") {
+              // On page unload, attempt to mark offline for this session (best-effort)
+              const onUnload = async () => {
+                try {
+                  await client.from("profiles").update({ online: false }).eq("id", sessionData.session.user.id);
+                } catch {}
+              };
+              window.addEventListener("beforeunload", onUnload);
+            }
+          } catch (err) {
+            // ignore presence subscription failures
+          }
         }
-      });
+
+        client.auth.onAuthStateChange(async (_event, session) => {
+          if (session?.user?.id) {
+            await refreshCurrentUser(session.user.id);
+            try { await client.from("profiles").update({ online: true }).eq("id", session.user.id); } catch {};
+          } else {
+            // mark previous cached user offline if possible
+            try { if (cachedUser && supabase) { await supabase.from("profiles").update({ online: false }).eq("id", cachedUser.id); } } catch {};
+            cachedUser = null;
+            publishAuthChange();
+          }
+        });
     } catch (error) {
       console.warn("Unable to initialize auth:", error);
       cachedUser = null;
