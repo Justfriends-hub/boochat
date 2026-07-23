@@ -20,6 +20,7 @@ import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppStatusRouteImport } from './routes/_app.status'
 import { Route as AuthLoginRouteImport } from './routes/auth.login'
 import { Route as AuthSignupRouteImport } from './routes/auth.signup'
+import { Route as JoinInviteCodeRouteImport } from './routes/join.$inviteCode'
 import { Route as AppChannelsChannelIdRouteImport } from './routes/_app.channels.$channelId'
 import { Route as AppChatsChatIdRouteImport } from './routes/_app.chats.$chatId'
 import { Route as AppGroupsGroupIdRouteImport } from './routes/_app.groups.$groupId'
@@ -80,6 +81,11 @@ const AuthSignupRoute = AuthSignupRouteImport.update({
   path: '/auth/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JoinInviteCodeRoute = JoinInviteCodeRouteImport.update({
+  id: '/join/$inviteCode',
+  path: '/join/$inviteCode',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppChannelsChannelIdRoute = AppChannelsChannelIdRouteImport.update({
   id: '/$channelId',
   path: '/$channelId',
@@ -117,6 +123,7 @@ export interface FileRoutesByFullPath {
   '/status': typeof AppStatusRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
+  '/join/$inviteCode': typeof JoinInviteCodeRoute
   '/channels/$channelId': typeof AppChannelsChannelIdRoute
   '/chats/$chatId': typeof AppChatsChatIdRoute
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/status': typeof AppStatusRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
+  '/join/$inviteCode': typeof JoinInviteCodeRoute
   '/channels/$channelId': typeof AppChannelsChannelIdRoute
   '/chats/$chatId': typeof AppChatsChatIdRoute
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/_app/status': typeof AppStatusRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
+  '/join/$inviteCode': typeof JoinInviteCodeRoute
   '/_app/channels/$channelId': typeof AppChannelsChannelIdRoute
   '/_app/chats/$chatId': typeof AppChatsChatIdRoute
   '/_app/groups/$groupId': typeof AppGroupsGroupIdRoute
@@ -172,6 +181,7 @@ export interface FileRouteTypes {
     | '/status'
     | '/auth/login'
     | '/auth/signup'
+    | '/join/$inviteCode'
     | '/channels/$channelId'
     | '/chats/$chatId'
     | '/groups/$groupId'
@@ -189,6 +199,7 @@ export interface FileRouteTypes {
     | '/status'
     | '/auth/login'
     | '/auth/signup'
+    | '/join/$inviteCode'
     | '/channels/$channelId'
     | '/chats/$chatId'
     | '/groups/$groupId'
@@ -207,6 +218,7 @@ export interface FileRouteTypes {
     | '/_app/status'
     | '/auth/login'
     | '/auth/signup'
+    | '/join/$inviteCode'
     | '/_app/channels/$channelId'
     | '/_app/chats/$chatId'
     | '/_app/groups/$groupId'
@@ -219,6 +231,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   AuthLoginRoute: typeof AuthLoginRoute
   AuthSignupRoute: typeof AuthSignupRoute
+  JoinInviteCodeRoute: typeof JoinInviteCodeRoute
   ExploreChannelChannelIdRoute: typeof ExploreChannelChannelIdRoute
   ExploreGroupGroupIdRoute: typeof ExploreGroupGroupIdRoute
 }
@@ -300,6 +313,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/signup'
       fullPath: '/auth/signup'
       preLoaderRoute: typeof AuthSignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join/$inviteCode': {
+      id: '/join/$inviteCode'
+      path: '/join/$inviteCode'
+      fullPath: '/join/$inviteCode'
+      preLoaderRoute: typeof JoinInviteCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/channels/$channelId': {
@@ -403,6 +423,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   AuthLoginRoute: AuthLoginRoute,
   AuthSignupRoute: AuthSignupRoute,
+  JoinInviteCodeRoute: JoinInviteCodeRoute,
   ExploreChannelChannelIdRoute: ExploreChannelChannelIdRoute,
   ExploreGroupGroupIdRoute: ExploreGroupGroupIdRoute,
 }

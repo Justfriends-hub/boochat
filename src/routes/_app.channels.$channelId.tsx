@@ -61,7 +61,7 @@ function ChannelPage() {
   useEffect(() => {
     // Generate share link
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-    setShareLink(`${baseUrl}/explore/channel/${channelId}`);
+    setShareLink(`${baseUrl}/join/${channelId}`);
   }, [channelId]);
 
   const isSuperAdmin = me.role === "admin";

@@ -20,7 +20,15 @@ function LoginPage() {
   const [password, setPassword] = useState("admin1234");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { if (me) nav({ to: "/chats" }); }, [me, nav]);
+  const invite = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("invite")
+    : null;
+
+  useEffect(() => {
+    if (me) {
+      nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined });
+    }
+  }, [me, nav, invite]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,7 +36,7 @@ function LoginPage() {
     try {
       await signIn(email, password);
       toast.success("Welcome back!");
-      nav({ to: "/chats" });
+      nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined });
     } catch (e: any) {
       toast.error(e.message);
     } finally { setBusy(false); }

@@ -22,7 +22,15 @@ function SignupPage() {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { if (me) nav({ to: "/chats" }); }, [me, nav]);
+  const invite = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("invite")
+    : null;
+
+  useEffect(() => {
+    if (me) {
+      nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined });
+    }
+  }, [me, nav, invite]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,7 +43,7 @@ function SignupPage() {
         toast.success("Account created. Check your email to confirm your account.");
       } else {
         toast.success("Account created!");
-        nav({ to: "/chats" });
+        nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined });
       }
     } catch (e: any) {
       toast.error(e.message);

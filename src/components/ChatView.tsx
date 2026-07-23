@@ -57,7 +57,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   useEffect(() => {
     if (!chat || typeof window === "undefined") return;
     if (chat.type !== "group") return;
-    setShareLink(`${window.location.origin}/explore/group/${chat.id}`);
+    setShareLink(`${window.location.origin}/join/${chat.id}`);
   }, [chat]);
 
   const copyShareLink = () => {
