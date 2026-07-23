@@ -47,6 +47,7 @@ export type Chat = {
   admins?: string[];
   permissions?: { onlyAdminsPost: boolean; onlyAdminsAdd: boolean };
   visibility?: Visibility;
+  joinRequests?: JoinRequest[];
 };
 
 export type Status = {
@@ -71,6 +72,7 @@ export type Channel = {
   onlyAdminsPost: boolean;
   createdAt: number;
   visibility?: Visibility;
+  joinRequests?: JoinRequest[];
 };
 export type ChannelPost = {
   id: string;
@@ -124,6 +126,13 @@ export type AuditLog = {
 };
 
 export type Draft = { chatId: string; text: string };
+
+export type JoinRequestStatus = "pending" | "approved" | "rejected";
+export type JoinRequest = {
+  userId: string;
+  requestedAt: number;
+  status: JoinRequestStatus;
+};
 
 export type Store = {
   users: User[];

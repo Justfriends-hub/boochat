@@ -1,6 +1,6 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
-import { getState, setState, type Chat } from "@/lib/mockStore";
+import { getState, setState, type Chat, type JoinRequest } from "@/lib/mockStore";
 
 function mapChat(chat: any, members: string[], group: any | null): Chat {
   const visibility = chat.visibility ?? (chat.is_public === false ? "private" : "public");
@@ -318,4 +318,56 @@ export function subscribeToChats(cb: () => void) {
     console.warn("Unable to subscribe to chat updates:", error);
     return () => undefined;
   }
+}
+
+function ensureJoinRequestList(requests?: JoinRequest[]) {
+  return requests?.filter((req) => req.status === "pending") ?? [];
+}
+
+export async function requestJoinGroup(chatId: string, userId: string) {
+  const chat = getState().chats.find((item) => item.id === chatId);
+  if (!chat) throw new Error("Group not found");
+  if (chat.memberIds.includes(userId)) {
+    throw new Error("You are already a member of this group.");
+  }
+
+  const pending = ensureJoinRequestList(chat.joinRequests).find((req) => req.userId === userId);
+  if (pending) {
+    throw new Error("Your join request is already pending approval.");
+  }
+
+  setState((s) => {
+    const target = s.chats.find((item) => item.id === chatId);
+    if (!target) return;
+    target.joinRequests = [
+      ...(target.joinRequests ?? []),
+      { userId, requestedAt: Date.now(), status: "pending" },
+    ];
+  });
+
+  publish("chats:changed");
+  publish(`chat:${chatId}`);
+}
+
+export async function approveJoinGroupRequest(chatId: string, userId: string) {
+  setState((s) => {
+    const target = s.chats.find((item) => item.id === chatId);
+    if (!target) return;
+    target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+    if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
+  });
+
+  publish("chats:changed");
+  publish(`chat:${chatId}`);
+}
+
+export async function rejectJoinGroupRequest(chatId: string, userId: string) {
+  setState((s) => {
+    const target = s.chats.find((item) => item.id === chatId);
+    if (!target) return;
+    target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+  });
+
+  publish("chats:changed");
+  publish(`chat:${chatId}`);
 }

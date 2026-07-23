@@ -1,4 +1,4 @@
-import { getState, setState, uid, type Channel, type ChannelPost, type Comment } from "@/lib/mockStore";
+import { getState, setState, uid, type Channel, type ChannelPost, type Comment, type JoinRequest } from "@/lib/mockStore";
 import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase } from "@/lib/supabaseClient";
 
@@ -509,5 +509,54 @@ export function viewCount(p: ChannelPost) {
 function isVisibilitySchemaError(error: any) {
   const message = `${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
   return message.includes("column") && message.includes("does not exist");
+}
+
+function ensureJoinRequestList(requests?: JoinRequest[]) {
+  return requests?.filter((req) => req.status === "pending") ?? [];
+}
+
+export async function requestJoinChannel(channelId: string, userId: string) {
+  const channel = getState().channels.find((item) => item.id === channelId);
+  if (!channel) throw new Error("Channel not found");
+  if (channel.memberIds.includes(userId)) {
+    throw new Error("You are already subscribed to this channel.");
+  }
+
+  const pending = ensureJoinRequestList(channel.joinRequests).find((req) => req.userId === userId);
+  if (pending) {
+    throw new Error("Your join request is already pending approval.");
+  }
+
+  setState((s) => {
+    const target = s.channels.find((item) => item.id === channelId);
+    if (!target) return;
+    target.joinRequests = [
+      ...(target.joinRequests ?? []),
+      { userId, requestedAt: Date.now(), status: "pending" },
+    ];
+  });
+
+  publish("channels:changed");
+}
+
+export async function approveJoinChannelRequest(channelId: string, userId: string) {
+  setState((s) => {
+    const target = s.channels.find((item) => item.id === channelId);
+    if (!target) return;
+    target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+    if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
+  });
+
+  publish("channels:changed");
+}
+
+export async function rejectJoinChannelRequest(channelId: string, userId: string) {
+  setState((s) => {
+    const target = s.channels.find((item) => item.id === channelId);
+    if (!target) return;
+    target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+  });
+
+  publish("channels:changed");
 }
 

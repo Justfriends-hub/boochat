@@ -9,6 +9,7 @@ import { Composer } from "@/components/Composer";
 import {
   getChannel, listPosts, createPost, togglePostLike, markPostViewed, likeCount, viewCount,
   subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe, updateChannel,
+  requestJoinChannel, approveJoinChannelRequest, rejectJoinChannelRequest,
 } from "@/api/channelsApi";
 import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
@@ -73,6 +74,8 @@ function ChannelPage() {
   const isSubscribed = channel?.memberIds.includes(me.id);
   const isPrivateChannel = channel?.visibility === "private";
   const isApprovedMember = !!channel && channel.memberIds.includes(me.id);
+  const isPendingJoinRequest = !!channel && (channel.joinRequests ?? []).some((req) => req.userId === me.id && req.status === "pending");
+  const pendingJoinRequests = (channel?.joinRequests ?? []).filter((req) => req.status === "pending");
   const canViewChannel = !isPrivateChannel || isApprovedMember || canManageVisibility;
 
   const handleSubscribe = async () => {
@@ -80,6 +83,39 @@ function ChannelPage() {
     await toggleChannelSubscribe(channel.id, me.id);
     qc.invalidateQueries({ queryKey: ["channel", channelId] });
     toast.success(isSubscribed ? "Unsubscribed from channel" : "Subscribed to channel!");
+  };
+
+  const handleRequestToJoin = async () => {
+    if (!channel) return;
+    try {
+      await requestJoinChannel(channel.id, me.id);
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      toast.success("Join request sent. The owner/admin can approve it.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to request access");
+    }
+  };
+
+  const handleApproveRequest = async (userId: string) => {
+    if (!channel || !canManageVisibility) return;
+    try {
+      await approveJoinChannelRequest(channel.id, userId);
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      toast.success("Request approved.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to approve request");
+    }
+  };
+
+  const handleRejectRequest = async (userId: string) => {
+    if (!channel || !canManageVisibility) return;
+    try {
+      await rejectJoinChannelRequest(channel.id, userId);
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      toast.success("Request rejected.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reject request");
+    }
   };
 
   const handleToggleVisibility = async () => {
@@ -185,6 +221,13 @@ function ChannelPage() {
             This channel is hidden until the owner or admin approves your membership.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">You cannot see posts or comment until you are accepted.</p>
+          <Button
+            className="mt-4 w-full"
+            onClick={handleRequestToJoin}
+            disabled={isPendingJoinRequest}
+          >
+            {isPendingJoinRequest ? "Join request pending" : "Request to join"}
+          </Button>
         </div>
       </div>
     );
@@ -403,6 +446,57 @@ function ChannelPage() {
                         {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                       </Button>
                     </div>
+                  </div>
+                )}
+
+                {/* Join Requests Section */}
+                {isOwner && channel.visibility === "private" && (
+                  <div className="space-y-3 rounded-lg border bg-muted/40 p-3">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Join Requests</p>
+                    {(channel.joinRequests ?? []).length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">No pending join requests</p>
+                    ) : (
+                      (channel.joinRequests ?? []).map((request) => {
+                        const requester = users.find((u) => u.id === request.userId);
+                        return (
+                          <div key={request.userId} className="flex items-center justify-between gap-2 p-2 rounded-lg hover:bg-muted">
+                            <div className="flex items-center gap-2">
+                              <UserAvatar name={requester?.displayName || ""} src={requester?.avatar} size={32} />
+                              <div className="flex flex-col">
+                                <p className="text-sm font-semibold">{requester?.displayName}</p>
+                                <p className="text-xs text-muted-foreground">{requester?.email}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="default"
+                                onClick={async () => {
+                                  if (!channel) return;
+                                  await approveJoinChannelRequest(channel.id, request.userId);
+                                  qc.invalidateQueries({ queryKey: ["channel", channelId] });
+                                  toast.success(`Approved ${requester?.displayName || "member"}'s request`);
+                                }}
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={async () => {
+                                  if (!channel) return;
+                                  await rejectJoinChannelRequest(channel.id, request.userId);
+                                  qc.invalidateQueries({ queryKey: ["channel", channelId] });
+                                  toast.success(`Rejected ${requester?.displayName || "member"}'s request`);
+                                }}
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 )}
               </>

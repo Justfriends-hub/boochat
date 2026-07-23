@@ -17,7 +17,7 @@ import {
   listMessages, sendMessage, editMessage, deleteMessage, forwardMessage,
   subscribeToChat, subscribeToTyping, markChatRead,
 } from "@/api/messagesApi";
-import { listChats, getChat, updateChat } from "@/api/chatsApi";
+import { listChats, getChat, updateChat, requestJoinGroup, approveJoinGroupRequest, rejectJoinGroupRequest } from "@/api/chatsApi";
 import { listUsers, getUser } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import { useUIStore } from "@/stores/uiStore";
@@ -146,6 +146,8 @@ export function ChatView({ chatId }: { chatId: string }) {
   const canManageVisibility = (me?.role === "admin" || me?.role === "superadmin") || me?.id === chat?.ownerId;
   const isPrivateGroup = chat?.type === "group" && chat.visibility === "private";
   const isApprovedMember = !!chat && !!me && chat.memberIds.includes(me.id);
+  const isPendingJoinRequest = !!chat && !!me && (chat.joinRequests ?? []).some((req) => req.userId === me.id && req.status === "pending");
+  const pendingJoinRequests = (chat?.joinRequests ?? []).filter((req) => req.status === "pending");
 
   const toggleVisibility = async () => {
     if (!chat || !canManageVisibility) return;
@@ -160,6 +162,42 @@ export function ChatView({ chatId }: { chatId: string }) {
       toast.error(message);
     } finally {
       setPrivacyBusy(false);
+    }
+  };
+
+  const requestJoin = async () => {
+    if (!chat || !me) return;
+    try {
+      await requestJoinGroup(chat.id, me.id);
+      qc.invalidateQueries({ queryKey: ["chat", chat.id] });
+      toast.success("Join request sent. The owner/admin can approve it.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to send join request.";
+      toast.error(message);
+    }
+  };
+
+  const approveRequest = async (userId: string) => {
+    if (!chat || !canManageVisibility) return;
+    try {
+      await approveJoinGroupRequest(chat.id, userId);
+      qc.invalidateQueries({ queryKey: ["chat", chat.id] });
+      toast.success("Request approved.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to approve request.";
+      toast.error(message);
+    }
+  };
+
+  const rejectRequest = async (userId: string) => {
+    if (!chat || !canManageVisibility) return;
+    try {
+      await rejectJoinGroupRequest(chat.id, userId);
+      qc.invalidateQueries({ queryKey: ["chat", chat.id] });
+      toast.success("Request rejected.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to reject request.";
+      toast.error(message);
     }
   };
 
@@ -183,6 +221,13 @@ export function ChatView({ chatId }: { chatId: string }) {
             This group is hidden until the owner or admin approves your membership.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">You cannot see the conversation or post inside it yet.</p>
+          <Button
+            className="mt-4 w-full"
+            onClick={requestJoin}
+            disabled={isPendingJoinRequest}
+          >
+            {isPendingJoinRequest ? "Join request pending" : "Request to join"}
+          </Button>
         </div>
       </div>
     );
@@ -332,6 +377,55 @@ export function ChatView({ chatId }: { chatId: string }) {
                     </Button>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground break-all">{shareLink || "Enable public sharing to generate a preview link."}</p>
+                </div>
+              )}
+              {pendingJoinRequests.length > 0 && canManageVisibility && (
+                <div className="rounded-2xl border bg-background p-3">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Join requests</p>
+                  {pendingJoinRequests.map((request) => {
+                    const user = users.find((u) => u.id === request.userId);
+                    return (
+                      <div key={request.userId} className="flex items-center justify-between gap-3 py-2 border-b last:border-0">
+                        <div className="flex items-center gap-2">
+                          <UserAvatar name={user?.displayName || ""} src={user?.avatar} size={32} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium">{user?.displayName}</p>
+                            <p className="text-xs text-muted-foreground">{user?.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => approveRequest(request.userId)}
+                            disabled={privacyBusy}
+                            aria-label="Approve request"
+                          >
+                            ✓
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => rejectRequest(request.userId)}
+                            disabled={privacyBusy}
+                            aria-label="Reject request"
+                          >
+                            ✕
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {chat.ownerId === me.id && chat.memberIds.length === 1 && (
+                <div className="rounded-2xl border bg-background p-3 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    You are the only member of this group. Invite others to join.
+                  </p>
+                  <Button variant="outline" onClick={requestJoin} className="mt-2">
+                    Invite members
+                  </Button>
                 </div>
               )}
             </div>
