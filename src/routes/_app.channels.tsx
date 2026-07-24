@@ -17,7 +17,7 @@ import {
 
 export const Route = createFileRoute("/_app/channels")({
   component: ChannelsPage,
-  head: () => ({ meta: [{ title: "Channels — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Channels — boochat" }] }),
 });
 
 function ChannelsPage() {

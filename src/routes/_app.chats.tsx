@@ -22,7 +22,7 @@ import type { Chat, Message } from "@/lib/mockStore";
 
 export const Route = createFileRoute("/_app/chats")({
   component: ChatsPage,
-  head: () => ({ meta: [{ title: "Chats — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Chats — boochat" }] }),
 });
 
 function ChatsPage() {

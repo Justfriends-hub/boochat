@@ -43,6 +43,25 @@ function setCachedSignedUrl(path: string, url: string, expiresAt: number) {
   saveSignedUrlCache(cache);
 }
 
+async function cacheViewedStatusMedia(status: Status) {
+  if (typeof window === "undefined" || !status?.media || status.media.startsWith("data:")) return;
+  if (!("caches" in window)) return;
+
+  try {
+    const cache = await caches.open("boochat-status-media");
+    const request = new Request(status.media, { mode: "cors" });
+    const existing = await cache.match(request);
+    if (existing) return;
+
+    const response = await fetch(request, { cache: "force-cache" });
+    if (response.ok) {
+      await cache.put(request, response.clone());
+    }
+  } catch {
+    // best-effort only
+  }
+}
+
 export function isExpired(s: Status) {
   return Date.now() - s.createdAt > 24 * 60 * 60 * 1000;
 }
@@ -377,6 +396,11 @@ export async function markStatusViewed(id: string, userId: string) {
     }
   });
   publish("status:changed");
+
+  const viewedStatus = getState().statuses.find((x) => x.id === id);
+  if (viewedStatus) {
+    cacheViewedStatusMedia(viewedStatus).catch(() => {});
+  }
 
   try {
     const supabase = ensureSupabase();

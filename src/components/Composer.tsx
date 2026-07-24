@@ -246,7 +246,7 @@ export function Composer({
             >
               <Paperclip className="h-5 w-5" aria-hidden="true" />
             </Button>
-            <div className="flex flex-1 flex-col gap-1">
+            <div className="flex flex-1 min-w-0 flex-col gap-1">
               {pendingImage && (
                 <div className="relative inline-block self-start ml-1">
                   <img
@@ -265,9 +265,9 @@ export function Composer({
                 </div>
               )}
               {pendingAudio && (
-                <div className="flex items-center gap-3 rounded-2xl border bg-muted px-3 py-2">
-                  <audio controls src={pendingAudio.preview} className="flex-1 rounded-lg bg-black/5" />
-                  <div className="text-xs text-muted-foreground">
+                <div className="flex min-w-0 items-center gap-3 rounded-2xl border bg-muted px-3 py-2">
+                  <audio controls src={pendingAudio.preview} className="flex-1 min-w-0 max-w-full rounded-lg bg-black/5" />
+                  <div className="text-xs text-muted-foreground whitespace-nowrap">
                     {String(Math.floor(pendingAudio.duration / 60)).padStart(2, "0")}:
                     {String(pendingAudio.duration % 60).padStart(2, "0")}
                   </div>
@@ -281,7 +281,7 @@ export function Composer({
                   </button>
                 </div>
               )}
-              <div className="flex items-end rounded-3xl border bg-muted px-3 py-1.5">
+              <div className="flex min-w-0 items-end rounded-3xl border bg-muted px-3 py-1.5">
                 <label htmlFor="composer-input" className="sr-only">Message</label>
                 <textarea
                   id="composer-input"

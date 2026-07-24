@@ -28,7 +28,7 @@ export function InstallButton() {
       onClick={async () => {
         const accepted = await triggerInstall();
         if (accepted) {
-          toast.success("Installing Boochat as an app…");
+          toast.success("Installing boochat as an app…");
         } else {
           toast.info("The install prompt is not available right now. Try again from the browser menu.");
         }

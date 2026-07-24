@@ -11,5 +11,5 @@ export const Route = createFileRoute("/_app/calls")({
       <EmptyState icon={Phone} title="No recent calls" description="Voice and video calls will appear here." />
     </div>
   ),
-  head: () => ({ meta: [{ title: "Calls — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Calls — boochat" }] }),
 });

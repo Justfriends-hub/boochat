@@ -39,7 +39,7 @@ export function InstallPromptBanner() {
     const handleAppInstalled = () => {
       setIsStandalone(true);
       setDeferredPrompt(null);
-      toast.success("Meshly app installed successfully!");
+      toast.success("boochat app installed successfully!");
     };
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
@@ -68,7 +68,7 @@ export function InstallPromptBanner() {
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === "accepted") {
-      toast.success("Installing Meshly…");
+      toast.success("Installing boochat…");
     }
     setDeferredPrompt(null);
   };
@@ -82,7 +82,7 @@ export function InstallPromptBanner() {
             <Smartphone className="h-5 w-5" />
           </div>
           <div className="flex-1 text-sm">
-            <p className="font-semibold text-foreground">Install Meshly App</p>
+            <p className="font-semibold text-foreground">Install boochat App</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               To install on iPhone: tap <Share className="inline h-3.5 w-3.5 mx-0.5 text-primary" /> Share, then select <span className="font-medium text-foreground">"Add to Home Screen"</span>.
             </p>
@@ -107,7 +107,7 @@ export function InstallPromptBanner() {
           <Smartphone className="h-5 w-5" />
         </div>
         <div className="flex-1 text-sm">
-          <p className="font-semibold text-foreground">Install Meshly App</p>
+          <p className="font-semibold text-foreground">Install boochat App</p>
           <p className="text-xs text-muted-foreground">
             Get the standalone app for offline messaging and instant loading.
           </p>

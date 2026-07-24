@@ -19,7 +19,7 @@ import { subscribe } from "@/lib/eventBus";
 
 export const Route = createFileRoute("/_app/status")({
   component: StatusPage,
-  head: () => ({ meta: [{ title: "Status — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Status — boochat" }] }),
 });
 
 function StatusPage() {
@@ -101,23 +101,21 @@ function StatusPage() {
               className="flex w-full items-center gap-3 rounded-xl p-2 hover:bg-muted"
             >
                 <div className="relative">
+                {my.length > 0 && my[0].media ? (
+                  <div className="h-16 w-16 overflow-hidden rounded-full border-2 border-primary bg-primary/5">
+                    <img
+                      src={my[0].media}
+                      alt="status preview"
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                ) : (
                   <UserAvatar name={me.displayName} src={me.avatar} size={52} />
-                  {/* show a tiny preview of latest status inside the avatar when available */}
-                  {my.length > 0 && my[0].media && (
-                    <span
-                      className="absolute -inset-0.5 rounded-full overflow-hidden"
-                      style={{
-                        // inner preview circle in the center (subtle, not full-cover)
-                        display: "block",
-                        width: 52,
-                        height: 52,
-                      }}
-                    >
-                      <img src={my[0].media} alt="status preview" className="w-full h-full object-cover opacity-70" />
-                      <span className="absolute inset-0 rounded-full ring-2 ring-primary pointer-events-none" />
-                    </span>
-                  )}
-                  {/* keep the add (+) affordance always visible so user can add another status */}
+                )}
+                {my.length > 0 && my[0].media && (
+                  <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-primary" />
+                )}
+                {/* keep the add (+) affordance always visible so user can add another status */}
                   <button
                     onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
                     aria-label="Add status"

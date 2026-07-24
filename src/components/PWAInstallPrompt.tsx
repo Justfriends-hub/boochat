@@ -11,7 +11,7 @@ export function PWAInstallPrompt() {
   const handleInstall = async () => {
     const accepted = await triggerInstall();
     if (accepted) {
-      toast.success("Installing Boochat as an app…");
+      toast.success("Installing boochat as an app…");
     } else if (!isIOS) {
       toast.info("The install prompt is not available right now. Try again from the browser menu.");
     }
@@ -25,7 +25,7 @@ export function PWAInstallPrompt() {
         </div>
 
         <div className="flex-1 text-sm">
-          <p className="font-semibold text-foreground">Install Boochat</p>
+          <p className="font-semibold text-foreground">Install boochat</p>
           {isIOS ? (
             <p className="mt-1 text-xs text-muted-foreground">
               On iPhone or iPad, tap <Share className="mx-0.5 inline h-3.5 w-3.5" /> Share and choose <span className="font-medium text-foreground">Add to Home Screen</span>.

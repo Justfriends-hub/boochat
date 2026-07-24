@@ -19,7 +19,7 @@ import {
 
 export const Route = createFileRoute("/_app/groups")({
   component: GroupsPage,
-  head: () => ({ meta: [{ title: "Groups — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Groups — boochat" }] }),
 });
 
 function GroupsPage() {

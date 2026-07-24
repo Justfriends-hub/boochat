@@ -67,7 +67,7 @@ export const Route = createFileRoute("/_app/admin")({
     };
   },
   component: AdminPage,
-  head: () => ({ meta: [{ title: "Admin — Boochat" }] }),
+  head: () => ({ meta: [{ title: "Admin — boochat" }] }),
 });
 
 function toDayStart(s: string) { return s ? new Date(s + "T00:00:00").getTime() : null; }
