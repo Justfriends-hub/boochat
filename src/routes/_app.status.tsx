@@ -15,6 +15,7 @@ import { getState } from "@/lib/mockStore";
 import { useAuth } from "@/hooks/useAuth";
 import { timeAgo } from "@/lib/format";
 import { toast } from "sonner";
+import { subscribe } from "@/lib/eventBus";
 
 export const Route = createFileRoute("/_app/status")({
   component: StatusPage,
@@ -39,7 +40,13 @@ function StatusPage() {
   useEffect(() => {
     if (!me) return;
     const unsub = subscribeToStatuses(() => qc.invalidateQueries({ queryKey: ["statuses"] }));
-    return unsub;
+    const unsubSeed = subscribe("store:seeded", () => qc.invalidateQueries({ queryKey: ["statuses"] }));
+    const unsubStatusChanged = subscribe("status:changed", () => qc.invalidateQueries({ queryKey: ["statuses"] }));
+    return () => {
+      unsub();
+      unsubSeed();
+      unsubStatusChanged();
+    };
   }, [me, qc]);
 
   if (!me) {

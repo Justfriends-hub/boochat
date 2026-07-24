@@ -21,6 +21,7 @@ function mapStatus(row: any): Status {
       userId: reaction.user_id,
       emoji: reaction.emoji,
     })),
+    storagePath: row.media_url || row.media || undefined,
   };
 }
 
@@ -40,10 +41,31 @@ async function getMediaUrl(mediaUrl: string) {
   }
 }
 
+async function deleteStatusMedia(status?: Pick<Status, "media" | "storagePath">) {
+  const storagePath = status?.storagePath || status?.media;
+  if (!storagePath || /^(https?:\/\/|data:)/i.test(storagePath)) return;
+  try {
+    const supabase = ensureSupabase();
+    await supabase.storage.from(STATUS_BUCKET).remove([storagePath]);
+  } catch {}
+}
+
+async function pruneExpiredStatuses() {
+  const expired = getState().statuses.filter((s) => isExpired(s));
+  if (!expired.length) return;
+
+  await Promise.all(expired.map((status) => deleteStatusMedia(status)));
+  setState((s) => {
+    s.statuses = s.statuses.filter((st) => !isExpired(st));
+  });
+}
+
 const STATUS_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 export async function listActiveStatuses(): Promise<Status[]> {
   try {
+    await pruneExpiredStatuses();
+
     const supabase = ensureSupabase();
     const { data, error } = await supabase
       .from("statuses")
@@ -60,17 +82,18 @@ export async function listActiveStatuses(): Promise<Status[]> {
       );
 
       setState((s) => {
-        // Merge Supabase statuses with local ones
         const existingIds = new Set(signedStatuses.map((st) => st.id));
         const localOnly = s.statuses.filter((st) => !existingIds.has(st.id) && !isExpired(st));
-        s.statuses = [...signedStatuses, ...localOnly];
+        const merged = [...signedStatuses, ...localOnly];
+        const byId = new Map(merged.map((st) => [st.id, st]));
+        s.statuses = Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
       });
-      return getState().statuses.filter((s) => !isExpired(s));
+      return getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
     }
   } catch (err) {
     console.warn("Unable to fetch active statuses online, returning cached statuses:", err);
   }
-  return getState().statuses.filter((s) => !isExpired(s));
+  return getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function createStatus(input: {
@@ -116,7 +139,11 @@ export async function createStatus(input: {
 
       if (!error && data) {
         const media = await getMediaUrl(path);
-        const mapped = mapStatus({ ...data, media_url: path, media });
+        const mapped = {
+          ...mapStatus({ ...data, media_url: path, media }),
+          media,
+          storagePath: path,
+        };
         setState((s) => { s.statuses.unshift(mapped); });
         publish("status:changed");
         return mapped;
@@ -173,6 +200,11 @@ export async function reactToStatus(id: string, userId: string, emoji: string) {
 }
 
 export async function deleteStatus(id: string) {
+  const target = getState().statuses.find((st) => st.id === id);
+  if (target) {
+    await deleteStatusMedia(target);
+  }
+
   setState((s) => {
     s.statuses = s.statuses.filter((st) => st.id !== id);
   });

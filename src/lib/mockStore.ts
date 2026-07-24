@@ -59,6 +59,7 @@ export type Status = {
   createdAt: number;
   viewedBy: string[];
   reactions: { userId: string; emoji: string }[];
+  storagePath?: string;
 };
 
 export type Channel = {
