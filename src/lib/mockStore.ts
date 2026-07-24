@@ -224,14 +224,7 @@ export function setState(mutator: (s: Store) => void) {
 
 export function initStore() {
   if (typeof window === "undefined") return;
-  // Seed if empty
-  if (state.users.length === 0) {
-    import("./seed").then(({ seed }) => {
-      seed(state);
-      save();
-      publish("store:seeded");
-    });
-  }
+  // Do not auto-seed demo data. The app should start with a clean store.
 }
 
 export function resetStore() {

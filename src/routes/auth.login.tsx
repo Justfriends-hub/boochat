@@ -16,8 +16,8 @@ export const Route = createFileRoute("/auth/login")({
 function LoginPage() {
   const nav = useNavigate();
   const me = useAuth();
-  const [email, setEmail] = useState("admin@demo.app");
-  const [password, setPassword] = useState("admin1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   const invite = typeof window !== "undefined"
@@ -91,9 +91,6 @@ function LoginPage() {
         </div>
         <p className="mt-6 text-center text-sm text-muted-foreground">
           New here? <Link to="/auth/signup" className="font-medium text-primary hover:underline">Create an account</Link>
-        </p>
-        <p className="mt-2 text-center text-xs text-muted-foreground">
-          Demo admin: admin@demo.app / admin1234
         </p>
       </Card>
     </div>
