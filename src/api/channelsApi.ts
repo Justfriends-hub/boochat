@@ -1,6 +1,7 @@
 import { getState, setState, uid, type Channel, type ChannelPost, type Comment, type JoinRequest } from "@/lib/mockStore";
 import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase } from "@/lib/supabaseClient";
+import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 
 function mapChannel(row: any, members: string[]): Channel {
   const visibility = row.visibility ?? (row.is_public === false ? "private" : "public");
@@ -225,7 +226,15 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
         pinned: p.pinned,
       }));
 
-      return mappedPosts;
+      // Batch-resolve image_url storage paths to signed URLs
+      const imagePaths = mappedPosts.map((p) => p.image ?? null);
+      const imageUrls = await batchGetImageUrls("channel-media", imagePaths);
+      const resolved = mappedPosts.map((p, i) => ({
+        ...p,
+        image: imageUrls[i] ?? p.image,
+      }));
+
+      return resolved;
     }
   } catch (error) {
     console.warn("Unable to load remote posts:", error);
@@ -253,13 +262,16 @@ export async function getPost(id: string): Promise<ChannelPost | undefined> {
         .eq("post_id", id)
         .eq("emoji", "❤️");
 
+      const rawImageUrl: string | undefined = post.image_url;
+      const image = rawImageUrl ? await getImageUrl("channel-media", rawImageUrl) : undefined;
+
       return {
         id: post.id,
         channelId: post.channel_id,
         authorId: post.author_id,
         kind: post.kind,
         body: post.body,
-        image: post.image_url,
+        image,
         likes: reactions?.map((r: any) => r.user_id) ?? [],
         views: [], // Approximate
         createdAt: new Date(post.created_at).getTime(),
@@ -316,7 +328,12 @@ export async function toggleChannelSubscribe(channelId: string, userId: string) 
 }
 
 export async function createPost(input: {
-  channelId: string; authorId: string; kind: "text" | "image"; body: string; image?: string;
+  channelId: string;
+  authorId: string;
+  kind: "text" | "image";
+  body: string;
+  /** Pass a File to compress+upload via the image pipeline, or a pre-resolved URL/path. */
+  image?: string | File;
 }) {
   try {
     const supabase = ensureSupabase();
@@ -330,6 +347,19 @@ export async function createPost(input: {
 
     if (!channel) throw new Error("Channel not found");
 
+    // If image is a File, compress and upload it first
+    let imageUrl: string | undefined;
+    if (input.image instanceof File) {
+      const path = await uploadImage(
+        input.image,
+        "channel-media",
+        `${input.channelId}/posts`,
+      );
+      imageUrl = path; // store storage path in DB
+    } else if (typeof input.image === "string" && input.image) {
+      imageUrl = input.image;
+    }
+
     const { data: post, error } = await supabase
       .from("channel_posts")
       .insert([{
@@ -337,12 +367,15 @@ export async function createPost(input: {
         author_id: input.authorId,
         kind: input.kind,
         body: input.body,
-        image_url: input.image,
+        image_url: imageUrl,
       }])
       .select()
       .single();
 
     if (error || !post) throw new Error(error?.message || "Failed to create post");
+
+    // Resolve the stored path to a signed URL for immediate display
+    const displayImage = imageUrl ? await getImageUrl("channel-media", imageUrl) : undefined;
 
     const mappedPost: ChannelPost = {
       id: post.id,
@@ -350,7 +383,7 @@ export async function createPost(input: {
       authorId: post.author_id,
       kind: post.kind,
       body: post.body,
-      image: post.image_url,
+      image: displayImage,
       likes: [],
       views: [],
       createdAt: new Date(post.created_at).getTime(),
@@ -436,12 +469,26 @@ export async function markPostViewed(postId: string, sessionId: string) {
 export async function deletePost(postId: string) {
   try {
     const supabase = ensureSupabase();
+
+    // Retrieve image_url before deleting so we can clean up storage
+    const { data: postRow } = await supabase
+      .from("channel_posts")
+      .select("image_url")
+      .eq("id", postId)
+      .single();
+
     const { error } = await supabase
       .from("channel_posts")
       .delete()
       .eq("id", postId);
 
     if (error) throw error;
+
+    // Clean up storage file if one was attached
+    if (postRow?.image_url) {
+      await deleteStorageFile("channel-media", postRow.image_url);
+    }
+
     publish("channels:changed");
   } catch (error) {
     console.error("Failed to delete post:", error);
@@ -560,3 +607,15 @@ export async function rejectJoinChannelRequest(channelId: string, userId: string
   publish("channels:changed");
 }
 
+
+/**
+ * Upload and set a new avatar for a channel.
+ * Compresses the file, uploads to `channel-media` bucket, and updates `channels.avatar_url`.
+ * Returns the signed URL for immediate display.
+ */
+export async function uploadChannelAvatar(channelId: string, file: File): Promise<string> {
+  const path = await uploadImage(file, "channel-media", `${channelId}/avatar`, { maxDim: 256 });
+  const signedUrl = await getImageUrl("channel-media", path);
+  await updateChannel(channelId, { avatar: path });
+  return signedUrl;
+}

@@ -22,7 +22,8 @@ export type Message = {
   chatId: string;
   senderId: string;
   kind: MessageKind;
-  body: string; // text, image url, or voice url
+  body: string; // text content, voice URL, or display URL for images
+  imagePath?: string; // Supabase Storage path for image messages (private bucket)
   duration?: number; // voice seconds
   createdAt: number;
   editedAt?: number;
@@ -31,6 +32,7 @@ export type Message = {
   forwardedFrom?: string;
   status: "pending" | "sent" | "delivered" | "read";
 };
+
 
 export type Visibility = "public" | "private";
 

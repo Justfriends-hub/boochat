@@ -1,4 +1,5 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
+import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 import type { Message, MessageKind } from "@/lib/mockStore";
 import {
   getCachedMessages,
@@ -18,6 +19,7 @@ function mapMessage(row: any): Message {
     senderId: row.sender_id,
     kind: row.kind,
     body: row.body || "",
+    imagePath: row.image_path ?? undefined,
     duration: row.duration ?? undefined,
     createdAt,
     editedAt: row.edited_at ? new Date(row.edited_at).getTime() : undefined,
@@ -53,7 +55,18 @@ export async function listMessages(chatId: string): Promise<Message[]> {
 
       if (!error && data) {
         const remoteMsgs = data.map(mapMessage);
-        setCachedMessages(chatId, remoteMsgs);
+
+        // Batch-resolve image_path values to signed URLs for image messages
+        const imagePaths = remoteMsgs.map((m) => m.imagePath ?? null);
+        const imageUrls = await batchGetImageUrls("chat-media", imagePaths);
+        const resolved = remoteMsgs.map((m, i) => {
+          if (m.kind === "image" && imageUrls[i]) {
+            return { ...m, body: imageUrls[i] as string };
+          }
+          return m;
+        });
+
+        setCachedMessages(chatId, resolved);
         return getCachedMessages(chatId);
       }
     } catch (err) {
@@ -70,17 +83,35 @@ export async function sendMessage(input: {
   senderId: string;
   kind: MessageKind;
   body: string;
+  /** Optional image File — will be compressed and uploaded to chat-media bucket. */
+  imageFile?: File;
   duration?: number;
   replyTo?: string;
   forwardedFrom?: string;
 }): Promise<Message> {
+  // If an image file is provided, upload it first before creating the optimistic message
+  let imagePath: string | undefined;
+  let imageDisplayUrl: string | undefined;
+
+  if (input.imageFile) {
+    // Upload immediately — if this fails, we throw before creating a pending message
+    // (prevents a stuck "pending" message with no image)
+    try {
+      imagePath = await uploadImage(input.imageFile, "chat-media", `${input.chatId}`);
+      imageDisplayUrl = await getImageUrl("chat-media", imagePath);
+    } catch (err: any) {
+      throw new Error(err.message || "Failed to upload image");
+    }
+  }
+
   const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const pendingMsg: Message = {
     id: tempId,
     chatId: input.chatId,
     senderId: input.senderId,
-    kind: input.kind,
-    body: input.body,
+    kind: input.imageFile ? "image" : input.kind,
+    body: imageDisplayUrl ?? input.body, // use signed URL for immediate display
+    imagePath,
     duration: input.duration,
     replyTo: input.replyTo,
     forwardedFrom: input.forwardedFrom,
@@ -104,8 +135,9 @@ export async function sendMessage(input: {
     const insert = {
       chat_id: input.chatId,
       sender_id: input.senderId,
-      kind: input.kind,
-      body: input.body,
+      kind: pendingMsg.kind,
+      body: input.body, // store plain text / empty in body; image lives in image_path
+      image_path: imagePath,
       duration: input.duration,
       reply_to: input.replyTo,
       forwarded_from: input.forwardedFrom,
@@ -124,6 +156,8 @@ export async function sendMessage(input: {
     }
 
     const sentMsg = mapMessage(data);
+    // Restore signed display URL so the UI doesn't flicker
+    if (imageDisplayUrl) sentMsg.body = imageDisplayUrl;
     
     // Replace pending message with confirmed sent message
     saveLocalMessage(sentMsg);
@@ -197,11 +231,24 @@ export async function editMessage(id: string, body: string) {
 
 export async function deleteMessage(id: string) {
   const supabase = ensureSupabase();
+
+  // Retrieve image_path before soft-deleting so we can clean up storage
+  const { data: msgRow } = await supabase
+    .from("messages")
+    .select("image_path")
+    .eq("id", id)
+    .single();
+
   const { error } = await supabase
     .from("messages")
     .update({ deleted_at: new Date().toISOString(), body: "" })
     .eq("id", id);
   if (error) throw new Error(error.message);
+
+  // Clean up storage file if one was attached
+  if (msgRow?.image_path) {
+    await deleteStorageFile("chat-media", msgRow.image_path);
+  }
 }
 
 export async function forwardMessage(id: string, toChatId: string, senderId: string) {

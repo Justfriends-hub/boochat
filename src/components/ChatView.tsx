@@ -133,10 +133,12 @@ export function ChatView({ chatId }: { chatId: string }) {
     }
   }, [filtered.length]);
 
-  const doSend = (p: { kind: "text" | "image" | "voice"; body: string; duration?: number }) => {
+  const doSend = (p: { kind: "text" | "image" | "voice"; body: string; file?: File; duration?: number }) => {
     if (!me) return;
     sendMessage({
-      chatId, senderId: me.id, kind: p.kind, body: p.body, duration: p.duration,
+      chatId, senderId: me.id, kind: p.kind, body: p.body,
+      imageFile: p.file, // File object from Composer — messagesApi will compress+upload
+      duration: p.duration,
       replyTo: replyTo?.id,
     });
     setReplyTo(null);

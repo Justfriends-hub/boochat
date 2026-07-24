@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useKeyboardOffset } from "@/hooks/useVisualViewport";
 
 export type ComposerAttachment =
-  | { kind: "image"; body: string }
+  | { kind: "image"; file: File; body: string } // body = object URL for preview
   | { kind: "voice"; body: string; duration: number };
 
 export function Composer({
@@ -19,7 +19,7 @@ export function Composer({
 }: {
   value: string;
   onChange: (v: string) => void;
-  onSend: (payload: { kind: "text" | "image" | "voice"; body: string; duration?: number }) => void;
+  onSend: (payload: { kind: "text" | "image" | "voice"; body: string; file?: File; duration?: number }) => void;
   replyTo?: { name: string; body: string } | null;
   onClearReply?: () => void;
   disabled?: boolean;
@@ -31,6 +31,8 @@ export function Composer({
   const [recording, setRecording] = useState(false);
   const [recordSec, setRecordSec] = useState(0);
   const recordTimer = useRef<any>(null);
+  // Pending image attachment (File + preview object URL)
+  const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -40,6 +42,14 @@ export function Composer({
   }, [value]);
 
   const send = () => {
+    // Send pending image if one is attached (with or without text caption)
+    if (pendingImage) {
+      onSend({ kind: "image", body: pendingImage.preview, file: pendingImage.file });
+      URL.revokeObjectURL(pendingImage.preview);
+      setPendingImage(null);
+      onChange("");
+      return;
+    }
     const v = value.trim();
     if (!v) return;
     onSend({ kind: "text", body: v });
@@ -49,11 +59,10 @@ export function Composer({
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      onSend({ kind: "image", body: String(reader.result) });
-    };
-    reader.readAsDataURL(f);
+    // Revoke previous preview URL
+    if (pendingImage) URL.revokeObjectURL(pendingImage.preview);
+    // Store file + preview; user confirms by pressing Send
+    setPendingImage({ file: f, preview: URL.createObjectURL(f) });
     e.target.value = "";
   };
 
@@ -112,45 +121,68 @@ export function Composer({
             >
               <Paperclip className="h-5 w-5" aria-hidden="true" />
             </Button>
-            <div className="flex flex-1 items-end rounded-3xl border bg-muted px-3 py-1.5">
-              <label htmlFor="composer-input" className="sr-only">Message</label>
-              <textarea
-                id="composer-input"
-                ref={textareaRef}
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                onFocus={() => {
-                  window.scrollTo(0, 0);
-                  if (document.body) document.body.scrollTop = 0;
-                }}
-                placeholder={placeholder}
-                aria-label="Message"
-                disabled={disabled}
-                rows={1}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  } else if (e.key === "Escape" && (replyTo || value)) {
-                    e.preventDefault();
-                    if (replyTo) onClearReply?.();
-                    else onChange("");
-                  }
-                }}
-                className={cn(
-                  "flex-1 resize-none bg-transparent py-1.5 text-base md:text-sm outline-none placeholder:text-muted-foreground",
-                )}
-                style={{ maxHeight: 128, fontSize: "16px" }}
-              />
-              <button
-                type="button"
-                aria-label="Insert emoji"
-                className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
-              >
-                <Smile className="h-5 w-5" aria-hidden="true" />
-              </button>
+            <div className="flex flex-1 flex-col gap-1">
+              {/* Pending image preview */}
+              {pendingImage && (
+                <div className="relative inline-block self-start ml-1">
+                  <img
+                    src={pendingImage.preview}
+                    alt="Attachment preview"
+                    className="h-16 w-16 rounded-lg object-cover border"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      URL.revokeObjectURL(pendingImage.preview);
+                      setPendingImage(null);
+                    }}
+                    aria-label="Remove attachment"
+                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs grid place-items-center"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+              <div className="flex items-end rounded-3xl border bg-muted px-3 py-1.5">
+                <label htmlFor="composer-input" className="sr-only">Message</label>
+                <textarea
+                  id="composer-input"
+                  ref={textareaRef}
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  onFocus={() => {
+                    window.scrollTo(0, 0);
+                    if (document.body) document.body.scrollTop = 0;
+                  }}
+                  placeholder={pendingImage ? "Add a caption… (or just press Send)" : placeholder}
+                  aria-label="Message"
+                  disabled={disabled}
+                  rows={1}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    } else if (e.key === "Escape" && (replyTo || value)) {
+                      e.preventDefault();
+                      if (replyTo) onClearReply?.();
+                      else onChange("");
+                    }
+                  }}
+                  className={cn(
+                    "flex-1 resize-none bg-transparent py-1.5 text-base md:text-sm outline-none placeholder:text-muted-foreground",
+                  )}
+                  style={{ maxHeight: 128, fontSize: "16px" }}
+                />
+                <button
+                  type="button"
+                  aria-label="Insert emoji"
+                  className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <Smile className="h-5 w-5" aria-hidden="true" />
+                </button>
+              </div>
             </div>
-            {value.trim() ? (
+            {(value.trim() || pendingImage) ? (
               <Button size="icon" onClick={send} aria-label="Send message" className="shrink-0 rounded-full">
                 <Send className="h-5 w-5" aria-hidden="true" />
               </Button>

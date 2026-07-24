@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Link as LinkIcon, Copy, Check } from "lucide-react";
+import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
@@ -9,7 +9,7 @@ import { Composer } from "@/components/Composer";
 import {
   getChannel, listPosts, createPost, togglePostLike, markPostViewed, likeCount, viewCount,
   subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe, updateChannel,
-  requestJoinChannel, approveJoinChannelRequest, rejectJoinChannelRequest,
+  requestJoinChannel, approveJoinChannelRequest, rejectJoinChannelRequest, uploadChannelAvatar,
 } from "@/api/channelsApi";
 import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
@@ -37,7 +37,8 @@ function ChannelPage() {
 
   const [openPost, setOpenPost] = useState<ChannelPost | null>(null);
   const [postText, setPostText] = useState("");
-  const [postImage, setPostImage] = useState<string | undefined>(undefined);
+  const [postImage, setPostImage] = useState<File | undefined>(undefined);
+  const [postImagePreview, setPostImagePreview] = useState<string | undefined>(undefined);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [editWallpaper, setEditWallpaper] = useState(false);
@@ -146,10 +147,12 @@ function ChannelPage() {
         authorId: me.id,
         kind: postImage ? "image" : "text",
         body: postText.trim(),
-        image: postImage,
+        image: postImage, // File object — API handles compress+upload
       });
       setPostText("");
       setPostImage(undefined);
+      if (postImagePreview) URL.revokeObjectURL(postImagePreview);
+      setPostImagePreview(undefined);
       toast.success("Post published!");
     } catch (err: any) {
       toast.error(err.message || "Failed to create post");
@@ -161,32 +164,29 @@ function ChannelPage() {
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPostImage(String(reader.result));
-    };
-    reader.readAsDataURL(file);
+    // Revoke previous preview
+    if (postImagePreview) URL.revokeObjectURL(postImagePreview);
+    // Store File for upload; create object URL for preview
+    setPostImage(file);
+    setPostImagePreview(URL.createObjectURL(file));
     e.target.value = "";
   };
 
   const handleWallpaperSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const imageUrl = String(reader.result);
-      setWallpaperUrl(imageUrl);
-      try {
-        await updateChannel(channelId, { avatar: imageUrl });
+    e.target.value = "";
+    // Use uploadChannelAvatar for compression + Supabase Storage
+    uploadChannelAvatar(channelId, file)
+      .then((signedUrl) => {
+        setWallpaperUrl(signedUrl);
         toast.success("Channel wallpaper updated!");
         setEditWallpaper(false);
         qc.invalidateQueries({ queryKey: ["channel", channelId] });
-      } catch (err: any) {
+      })
+      .catch((err: any) => {
         toast.error(err.message || "Failed to update wallpaper");
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+      });
   };
 
   const copyShareLink = () => {
@@ -311,11 +311,15 @@ function ChannelPage() {
 
       {canPost ? (
         <div className="border-t bg-card p-3 space-y-2">
-          {postImage && (
+          {postImagePreview && (
             <div className="relative inline-block">
-              <img src={postImage} alt="Preview" className="h-20 w-20 rounded-lg object-cover border" />
+              <img src={postImagePreview} alt="Preview" className="h-20 w-20 rounded-lg object-cover border" />
               <button
-                onClick={() => setPostImage(undefined)}
+                onClick={() => {
+                  setPostImage(undefined);
+                  if (postImagePreview) URL.revokeObjectURL(postImagePreview);
+                  setPostImagePreview(undefined);
+                }}
                 className="absolute -top-2 -right-2 rounded-full bg-destructive text-destructive-foreground h-5 w-5 text-xs grid place-items-center"
               >
                 ✕
@@ -336,7 +340,7 @@ function ChannelPage() {
               className="flex-1 bg-muted rounded-full px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
             />
             <Button size="icon" onClick={handleCreatePost} disabled={isSubmitting || (!postText.trim() && !postImage)}>
-              <Send className="h-4 w-4" />
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>
         </div>

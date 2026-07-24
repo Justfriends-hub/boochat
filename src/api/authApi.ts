@@ -1,4 +1,5 @@
 import { ensureSupabase, supabase, supabaseConfigured } from "@/lib/supabaseClient";
+import { uploadImage, getImageUrl } from "@/lib/imageUpload";
 import { publish, subscribe } from "@/lib/eventBus";
 import type { User } from "@/lib/mockStore";
 
@@ -9,17 +10,37 @@ let initializePromise: Promise<void> | null = null;
 function toUser(profile: any, roles: Array<{ role: string }> | null = null): User {
   const roleStr = roles?.[0]?.role ?? "user";
   const role = roleStr === "superadmin" ? "superadmin" : roleStr === "admin" ? "admin" : "user";
+  // avatar_url may be a storage path (e.g. "userId/123.jpg") or a full https:// URL.
+  // getImageUrl handles both: passes through https:// links, resolves storage paths.
+  const rawAvatar = profile.avatar_url || "";
+  const avatar =
+    rawAvatar && !/^https?:\/\//i.test(rawAvatar)
+      ? undefined // resolved asynchronously below by resolveUserAvatar
+      : rawAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
   return {
     id: profile.id,
     email: profile.email,
     displayName: profile.display_name || profile.email.split("@")[0],
-    avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`,
+    avatar: avatar ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`,
     role,
     online: profile.online ?? false,
     banned: profile.banned ?? false,
     bio: profile.bio ?? undefined,
     password: profile.password ?? "",
-  };
+    // Carry the raw path so callers can resolve it if needed
+    _avatarPath: rawAvatar && !/^https?:\/\//i.test(rawAvatar) ? rawAvatar : undefined,
+  } as User & { _avatarPath?: string };
+}
+
+/** Resolves a profile row's avatar_url to a usable URL (public CDN or DiceBear fallback). */
+async function resolveAvatarUrl(profile: any): Promise<string> {
+  const raw: string = profile.avatar_url || "";
+  if (!raw) return `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
+  try {
+    return await getImageUrl("avatars", raw);
+  } catch {
+    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
+  }
 }
 
 function publishAuthChange() {
@@ -141,13 +162,45 @@ async function refreshCurrentUser(userId: string) {
       return;
     }
 
-    cachedUser = toUser(profile, roles);
+    const user = toUser(profile, roles);
+    // Resolve storage-path avatars to public URLs asynchronously
+    user.avatar = await resolveAvatarUrl(profile);
+    cachedUser = user;
     publishAuthChange();
   } catch (error) {
     console.warn("Unable to refresh current user:", error);
     cachedUser = null;
     publishAuthChange();
   }
+}
+
+/**
+ * Updates profile fields and/or the user's avatar.
+ * Pass `avatarFile` to compress and upload a new profile picture.
+ */
+export async function updateProfile(
+  userId: string,
+  updates: { displayName?: string; bio?: string; avatarFile?: File },
+): Promise<void> {
+  const client = ensureSupabase();
+  const dbUpdate: Record<string, unknown> = {};
+
+  if (updates.displayName !== undefined) dbUpdate.display_name = updates.displayName;
+  if (updates.bio !== undefined) dbUpdate.bio = updates.bio;
+
+  if (updates.avatarFile) {
+    // Compress to 256 × 256 max for avatars, then upload to the public bucket
+    const path = await uploadImage(updates.avatarFile, "avatars", userId, { maxDim: 256 });
+    dbUpdate.avatar_url = path;
+  }
+
+  if (Object.keys(dbUpdate).length === 0) return;
+
+  const { error } = await client.from("profiles").update(dbUpdate).eq("id", userId);
+  if (error) throw new Error(error.message);
+
+  // Refresh in-memory user so the UI updates immediately
+  await refreshCurrentUser(userId);
 }
 
 export async function signIn(email: string, password: string): Promise<User> {
