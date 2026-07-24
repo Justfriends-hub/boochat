@@ -95,14 +95,32 @@ function StatusPage() {
               onClick={() => my.length ? openViewer(my, 0) : fileRef.current?.click()}
               className="flex w-full items-center gap-3 rounded-xl p-2 hover:bg-muted"
             >
-              <div className="relative">
-                <UserAvatar name={me.displayName} src={me.avatar} size={52} />
-                {my.length === 0 && (
-                  <span className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full bg-primary text-primary-foreground border-2 border-background">
+                <div className="relative">
+                  <UserAvatar name={me.displayName} src={me.avatar} size={52} />
+                  {/* show a tiny preview of latest status inside the avatar when available */}
+                  {my.length > 0 && my[0].media && (
+                    <span
+                      className="absolute -inset-0.5 rounded-full overflow-hidden"
+                      style={{
+                        // inner preview circle in the center (subtle, not full-cover)
+                        display: "block",
+                        width: 52,
+                        height: 52,
+                      }}
+                    >
+                      <img src={my[0].media} alt="status preview" className="w-full h-full object-cover opacity-70" />
+                      <span className="absolute inset-0 rounded-full ring-2 ring-primary pointer-events-none" />
+                    </span>
+                  )}
+                  {/* keep the add (+) affordance always visible so user can add another status */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
+                    aria-label="Add status"
+                    className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full bg-primary text-primary-foreground border-2 border-background"
+                  >
                     <Plus className="h-3.5 w-3.5" />
-                  </span>
-                )}
-              </div>
+                  </button>
+                </div>
               <div className="text-left">
                 <p className="font-semibold">My status</p>
                 <p className="text-xs text-muted-foreground">
@@ -118,13 +136,13 @@ function StatusPage() {
           {recent.length > 0 && (
             <section className="border-b p-3">
               <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Recent Updates</p>
-              <StatusList items={recent} users={users} onOpen={(i) => openViewer(recent, i)} />
+              <StatusList items={recent} users={users} allStatuses={statuses} meId={me.id} onOpen={(i) => openViewer(recent, i)} />
             </section>
           )}
           {viewed.length > 0 && (
             <section className="p-3">
               <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Viewed Updates</p>
-              <StatusList items={viewed} users={users} onOpen={(i) => openViewer(viewed, i)} />
+              <StatusList items={viewed} users={users} allStatuses={statuses} meId={me.id} onOpen={(i) => openViewer(viewed, i)} />
             </section>
           )}
           {others.length === 0 && (
@@ -146,19 +164,33 @@ function StatusPage() {
   );
 }
 
-function StatusList({ items, users, onOpen }: { items: any[]; users: any[]; onOpen: (i: number) => void }) {
+function StatusList({ items, users, allStatuses, meId, onOpen }: { items: any[]; users: any[]; allStatuses: any[]; meId: string; onOpen: (i: number) => void }) {
   return (
     <ul className="space-y-1">
       {items.map((s, i) => {
         const u = users.find((x: any) => x.id === s.userId);
+        const unreadCount = allStatuses.filter((st) => st.userId === s.userId && !st.viewedBy.includes(meId)).length;
         return (
           <li key={s.id}>
             <button
               onClick={() => onOpen(i)}
               className="flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-muted"
             >
-              <div className="rounded-full ring-2 ring-primary p-0.5">
-                <UserAvatar name={u?.displayName || ""} src={u?.avatar} size={48} />
+              <div className="relative">
+                <div className="rounded-full ring-2 ring-primary p-0.5">
+                  <UserAvatar name={u?.displayName || ""} src={u?.avatar} size={48} />
+                </div>
+                {items[i] && items[i].media && (
+                  <span className="absolute -inset-0.5 rounded-full overflow-hidden" style={{ width: 48, height: 48 }}>
+                    <img src={items[i].media} alt="status preview" className="w-full h-full object-cover opacity-75" />
+                    <span className="absolute inset-0 rounded-full ring-2 ring-primary pointer-events-none" />
+                  </span>
+                )}
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 rounded-full bg-rose-600 text-white text-xs font-semibold">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
               </div>
               <div>
                 <p className="font-medium">{u?.displayName}</p>
