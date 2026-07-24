@@ -57,10 +57,42 @@ function StatusPage() {
     );
   }
 
-  const my = useMemo(() => statuses.filter((s) => s.userId === me.id), [statuses, me.id]);
-  const others = useMemo(() => statuses.filter((s) => s.userId !== me.id), [statuses, me.id]);
-  const recent = others.filter((s) => !s.viewedBy.includes(me.id));
-  const viewed = others.filter((s) => s.viewedBy.includes(me.id));
+  const my = useMemo(
+    () => statuses
+      .filter((s) => s.userId === me.id)
+      .sort((a, b) => b.createdAt - a.createdAt),
+    [statuses, me.id],
+  );
+
+  const othersByUser = useMemo(() => {
+    const groups = new Map<string, { statuses: any[]; latest: any; unreadCount: number }>();
+    statuses.forEach((s) => {
+      if (s.userId === me.id) return;
+      const existing = groups.get(s.userId);
+      const isUnread = !s.viewedBy.includes(me.id);
+      if (!existing) {
+        groups.set(s.userId, { statuses: [s], latest: s, unreadCount: isUnread ? 1 : 0 });
+      } else {
+        existing.statuses.push(s);
+        if (s.createdAt > existing.latest.createdAt) existing.latest = s;
+        if (isUnread) existing.unreadCount += 1;
+      }
+    });
+    return Array.from(groups.entries())
+      .map(([userId, group]) => {
+        const sorted = group.statuses.sort((a, b) => b.createdAt - a.createdAt);
+        return {
+          userId,
+          statuses: sorted,
+          latest: sorted[0],
+          unreadCount: sorted.filter((st) => !st.viewedBy.includes(me.id)).length,
+        };
+      })
+      .sort((a, b) => b.latest.createdAt - a.latest.createdAt);
+  }, [statuses, me.id]);
+
+  const recent = othersByUser.filter((group) => group.unreadCount > 0);
+  const viewed = othersByUser.filter((group) => group.unreadCount === 0);
 
   const upload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -139,16 +171,16 @@ function StatusPage() {
           {recent.length > 0 && (
             <section className="border-b p-3">
               <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Recent Updates</p>
-              <StatusList items={recent} users={users} allStatuses={statuses} meId={me.id} onOpen={(i) => openViewer(recent, i)} />
+              <StatusList groups={recent} users={users} onOpen={(statuses) => openViewer(statuses, 0)} />
             </section>
           )}
           {viewed.length > 0 && (
             <section className="p-3">
               <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Viewed Updates</p>
-              <StatusList items={viewed} users={users} allStatuses={statuses} meId={me.id} onOpen={(i) => openViewer(viewed, i)} />
+              <StatusList groups={viewed} users={users} onOpen={(statuses) => openViewer(statuses, 0)} />
             </section>
           )}
-          {others.length === 0 && (
+          {othersByUser.length === 0 && (
             <EmptyState icon={CircleIcon} title="No status updates" description="When friends share, you'll see them here." />
           )}
         </div>
@@ -167,37 +199,39 @@ function StatusPage() {
   );
 }
 
-function StatusList({ items, users, allStatuses, meId, onOpen }: { items: any[]; users: any[]; allStatuses: any[]; meId: string; onOpen: (i: number) => void }) {
+function StatusList({ groups, users, onOpen }: { groups: Array<{ userId: string; statuses: any[]; latest: any; unreadCount: number }>; users: any[]; onOpen: (statuses: any[]) => void }) {
   return (
     <ul className="space-y-1">
-      {items.map((s, i) => {
-        const u = users.find((x: any) => x.id === s.userId);
-        const unreadCount = allStatuses.filter((st) => st.userId === s.userId && !st.viewedBy.includes(meId)).length;
+      {groups.map((group) => {
+        const u = users.find((x: any) => x.id === group.userId);
+        const statusCount = group.statuses.length;
         return (
-          <li key={s.id}>
+          <li key={group.userId}>
             <button
-              onClick={() => onOpen(i)}
+              onClick={() => onOpen(group.statuses)}
               className="flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-muted"
             >
               <div className="relative">
                 <div className="rounded-full ring-2 ring-primary p-0.5">
                   <UserAvatar name={u?.displayName || ""} src={u?.avatar} size={48} />
                 </div>
-                {items[i] && items[i].media && (
+                {group.latest?.media && (
                   <span className="absolute -inset-0.5 rounded-full overflow-hidden" style={{ width: 48, height: 48 }}>
-                    <img src={items[i].media} alt="status preview" className="w-full h-full object-cover opacity-75" />
+                    <img src={group.latest.media} alt="status preview" className="w-full h-full object-cover opacity-75" />
                     <span className="absolute inset-0 rounded-full ring-2 ring-primary pointer-events-none" />
                   </span>
                 )}
-                {unreadCount > 0 && (
+                {group.unreadCount > 0 && (
                   <span className="absolute -top-1 -right-1 inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 rounded-full bg-rose-600 text-white text-xs font-semibold">
-                    {unreadCount > 9 ? "9+" : unreadCount}
+                    {group.unreadCount > 9 ? "9+" : group.unreadCount}
                   </span>
                 )}
               </div>
               <div>
                 <p className="font-medium">{u?.displayName}</p>
-                <p className="text-xs text-muted-foreground">{timeAgo(s.createdAt)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {statusCount > 1 ? `${statusCount} updates • ${timeAgo(group.latest.createdAt)}` : timeAgo(group.latest.createdAt)}
+                </p>
               </div>
             </button>
           </li>
