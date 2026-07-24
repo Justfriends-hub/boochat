@@ -11,7 +11,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import type { Status, User } from "@/lib/mockStore";
 
-const DURATION_MS = 5000;
+const DEFAULT_DURATION_MS = 5000;
 
 // Preload the next media asset. Returns a cancel() that aborts / discards it.
 function preloadMedia(url: string, kind: "image" | "video"): () => void {
@@ -48,12 +48,14 @@ export function StoryViewer({
   const [paused, setPaused] = useState(false);
   const [reply, setReply] = useState("");
   const [mediaReady, setMediaReady] = useState(false);
+  const [storyDuration, setStoryDuration] = useState(DEFAULT_DURATION_MS);
   const navigate = useNavigate();
   const rafRef = useRef<number | null>(null);
   const startRef = useRef<number>(Date.now());
   const elapsedRef = useRef<number>(0);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const current = statuses[index];
@@ -74,7 +76,9 @@ export function StoryViewer({
 
   // Reset per-story state
   useEffect(() => {
+    setPaused(false);
     setMediaReady(false);
+    setStoryDuration(DEFAULT_DURATION_MS);
     setProgress(0);
     elapsedRef.current = 0;
     startRef.current = Date.now();
@@ -94,7 +98,7 @@ export function StoryViewer({
       const delta = now - startRef.current;
       startRef.current = now;
       elapsedRef.current += delta;
-      const p = Math.min(1, elapsedRef.current / DURATION_MS);
+      const p = Math.min(1, elapsedRef.current / storyDuration);
       setProgress(p);
       if (p >= 1) {
         if (index + 1 < statuses.length) setIndex(index + 1);
@@ -105,7 +109,7 @@ export function StoryViewer({
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [index, paused, mediaReady, current, statuses.length, onClose]);
+  }, [index, paused, mediaReady, current, statuses.length, onClose, storyDuration]);
 
   // Focus mgmt + keyboard controls
   useEffect(() => {
@@ -302,11 +306,20 @@ export function StoryViewer({
             ) : (
               <video
                 key={current.id}
+                ref={videoRef}
                 src={current.media}
                 autoPlay
                 muted
                 playsInline
-                onLoadedData={() => setMediaReady(true)}
+                onLoadedData={(event) => {
+                  setMediaReady(true);
+                  const video = event.currentTarget;
+                  const durationMs = isFinite(video.duration)
+                    ? Math.max(1000, Math.min(60000, video.duration * 1000))
+                    : DEFAULT_DURATION_MS;
+                  setStoryDuration(durationMs);
+                }}
+                onEnded={goNext}
                 onError={() => setMediaReady(true)}
                 className="h-full w-full object-cover"
               />
@@ -336,27 +349,25 @@ export function StoryViewer({
           <ChevronRight className="hidden" aria-hidden="true" />
         </button>
       </div>
-      <div className="flex items-center gap-2 p-3 bg-black">
-        {current.userId !== viewerId && (
-          <>
-            <label htmlFor="story-reply" className="sr-only">Reply to story</label>
-            <Input
-              id="story-reply"
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
-              placeholder="Reply to story…"
-              className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
-              onKeyDown={(e) => e.key === "Enter" && doReply()}
-            />
-            <Button size="icon" variant="ghost" onClick={() => doReact("❤️")} aria-label="React with heart" className="text-white hover:text-white hover:bg-white/10">
-              <Heart className="h-5 w-5" aria-hidden="true" />
-            </Button>
-            <Button size="icon" onClick={doReply} aria-label="Send reply">
-              <Send className="h-5 w-5" aria-hidden="true" />
-            </Button>
-          </>
-        )}
-      </div>
+      {current.userId !== viewerId && (
+        <div className="flex items-center gap-2 p-3 bg-black">
+          <label htmlFor="story-reply" className="sr-only">Reply to story</label>
+          <Input
+            id="story-reply"
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            placeholder="Reply to story…"
+            className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
+            onKeyDown={(e) => e.key === "Enter" && doReply()}
+          />
+          <Button size="icon" variant="ghost" onClick={() => doReact("❤️")} aria-label="React with heart" className="text-white hover:text-white hover:bg-white/10">
+            <Heart className="h-5 w-5" aria-hidden="true" />
+          </Button>
+          <Button size="icon" onClick={doReply} aria-label="Send reply">
+            <Send className="h-5 w-5" aria-hidden="true" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
