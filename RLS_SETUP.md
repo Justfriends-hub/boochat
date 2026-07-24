@@ -1,6 +1,6 @@
 # Supabase RLS (Row Level Security) Setup Guide
 
-This guide explains how to set up the Row Level Security policies required for the Meshly chat app to work with Supabase.
+This guide explains how to set up the Row Level Security policies required for the Boochat chat app to work with Supabase.
 
 ## Required RLS Policies
 

@@ -16,7 +16,7 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/settings")({
   component: SettingsPage,
-  head: () => ({ meta: [{ title: "Settings — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Settings — Boochat" }] }),
 });
 
 function SettingsPage() {

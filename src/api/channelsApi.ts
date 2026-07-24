@@ -3,6 +3,10 @@ import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 
+function isFullUrl(value?: string): boolean {
+  return !!value && /^(https?:\/\/|data:|blob:)/i.test(value);
+}
+
 function mapChannel(row: any, members: string[]): Channel {
   const visibility = row.visibility ?? (row.is_public === false ? "private" : "public");
   return {
@@ -17,6 +21,15 @@ function mapChannel(row: any, members: string[]): Channel {
     createdAt: new Date(row.created_at).getTime(),
     visibility,
   };
+}
+
+async function resolveChannelAvatars(channels: Channel[]): Promise<Channel[]> {
+  const paths = channels.map((ch) => ch.avatar && !isFullUrl(ch.avatar) ? ch.avatar : undefined);
+  const signed = await batchGetImageUrls("channel-media", paths);
+  return channels.map((ch, idx) => ({
+    ...ch,
+    avatar: signed[idx] ?? ch.avatar,
+  }));
 }
 
 async function fetchChannelMembers(channelIds: string[]) {
@@ -50,7 +63,7 @@ export async function listChannels(): Promise<Channel[]> {
       const channelIds = channels.map((c) => c.id);
       const memberRows = await fetchChannelMembers(channelIds);
       
-      const remoteChannels = channels.map((ch) => {
+      let remoteChannels = channels.map((ch) => {
         const members = memberRows
           .filter((row) => row.channel_id === ch.id)
           .map((row) => row.user_id);
@@ -62,6 +75,7 @@ export async function listChannels(): Promise<Channel[]> {
         return remoteChannel;
       });
 
+      remoteChannels = await resolveChannelAvatars(remoteChannels);
       setState((s) => { s.channels = remoteChannels; });
       return remoteChannels;
     }
@@ -89,8 +103,11 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
       const members = (memberRows ?? []).map((row) => row.user_id);
       const allMembers = [channelRow.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
       const cached = getState().channels.find((c) => c.id === id);
-      const remoteChannel = mapChannel(channelRow, allMembers);
+      let remoteChannel = mapChannel(channelRow, allMembers);
       if (cached?.visibility) remoteChannel.visibility = cached.visibility;
+      if (!isFullUrl(remoteChannel.avatar)) {
+        remoteChannel.avatar = await getImageUrl("channel-media", remoteChannel.avatar);
+      }
       
       setState((s) => {
         const idx = s.channels.findIndex((c) => c.id === id);
@@ -118,6 +135,7 @@ export async function createChannel(input: { name: string; description: string; 
       description: input.description,
       avatar_url: avatar,
       owner_id: input.ownerId,
+      visibility,
     }])
     .select()
     .single();
@@ -135,7 +153,18 @@ export async function createChannel(input: { name: string; description: string; 
     console.warn("Failed to add owner as member:", memberError);
   }
 
-  const ch = mapChannel({ ...channelRow, visibility }, [input.ownerId]);
+  let ch = mapChannel({ ...channelRow, visibility }, [input.ownerId]);
+  if (!isFullUrl(ch.avatar)) {
+    ch.avatar = await getImageUrl("channel-media", ch.avatar);
+  }
+  setState((s) => {
+    const existing = s.channels.find((c) => c.id === ch.id);
+    if (existing) {
+      Object.assign(existing, ch);
+    } else {
+      s.channels.unshift(ch);
+    }
+  });
   publish("channels:changed");
   return ch;
 }
@@ -166,10 +195,26 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
     if (error) throw new Error(error.message);
   }
 
-  if (updates.visibility !== undefined) {
+  if (updates.visibility !== undefined || updates.avatar !== undefined || updates.name !== undefined || updates.description !== undefined) {
     setState((s) => {
       const channel = s.channels.find((c) => c.id === id);
-      if (channel) channel.visibility = updates.visibility;
+      if (!channel) return;
+      if (updates.visibility !== undefined) channel.visibility = updates.visibility;
+      if (updates.name !== undefined) channel.name = updates.name;
+      if (updates.description !== undefined) channel.description = updates.description;
+      if (updates.avatar !== undefined) {
+        channel.avatar = isFullUrl(updates.avatar)
+          ? updates.avatar
+          : `channel-media:${updates.avatar}`; // placeholder until resolved below
+      }
+    });
+  }
+
+  if (updates.avatar !== undefined && !isFullUrl(updates.avatar)) {
+    const resolvedAvatar = await getImageUrl("channel-media", updates.avatar);
+    setState((s) => {
+      const channel = s.channels.find((c) => c.id === id);
+      if (channel) channel.avatar = resolvedAvatar;
     });
   }
 

@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/auth/login")({
   component: LoginPage,
-  head: () => ({ meta: [{ title: "Sign in — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Sign in — Boochat" }] }),
 });
 
 function LoginPage() {
@@ -58,7 +58,7 @@ function LoginPage() {
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-primary text-primary-foreground text-xl font-bold">M</div>
           <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
-          <p className="text-sm text-muted-foreground">Sign in to continue to Meshly</p>
+          <p className="text-sm text-muted-foreground">Sign in to continue to Boochat</p>
         </div>
         <form onSubmit={submit} className="space-y-4">
           <div>

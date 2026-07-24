@@ -33,7 +33,7 @@ export function AppNav() {
           <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground font-bold" aria-hidden="true">
             M
           </div>
-          <span className="text-lg font-semibold tracking-tight">Meshly</span>
+          <span className="text-lg font-semibold tracking-tight">Boochat</span>
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4" aria-label="Sections">
           {nav.map((it) => {

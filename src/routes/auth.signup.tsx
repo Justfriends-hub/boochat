@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/auth/signup")({
   component: SignupPage,
-  head: () => ({ meta: [{ title: "Create account — Meshly" }] }),
+  head: () => ({ meta: [{ title: "Create account — Boochat" }] }),
 });
 
 function SignupPage() {
@@ -66,7 +66,7 @@ function SignupPage() {
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-primary text-primary-foreground text-xl font-bold">M</div>
           <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
-          <p className="text-sm text-muted-foreground">Join Meshly in seconds</p>
+          <p className="text-sm text-muted-foreground">Join Boochat in seconds</p>
         </div>
         <form onSubmit={submit} className="space-y-4">
           <div>
