@@ -200,6 +200,20 @@ export function StoryViewer({
     }
   };
 
+  const doReply = async () => {
+    if (!reply.trim() || !user) return;
+    const chat = await getOrCreateDM(viewerId, user.id);
+    await sendMessage({
+      chatId: chat.id,
+      senderId: viewerId,
+      kind: "text",
+      body: `Re: your status — ${reply}`,
+    });
+    setReply("");
+    onClose();
+    navigate({ to: "/chats/$chatId", params: { chatId: chat.id } });
+  };
+
   return (
     <div
       ref={rootRef}

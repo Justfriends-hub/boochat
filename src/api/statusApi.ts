@@ -193,6 +193,8 @@ export async function createStatus(input: {
 }
 
 export async function markStatusViewed(id: string, userId: string) {
+  if (!id || !userId) return;
+
   // Always update local store immediately
   setState((s) => {
     const st = s.statuses.find((x) => x.id === id);
@@ -207,7 +209,9 @@ export async function markStatusViewed(id: string, userId: string) {
     await supabase
       .from("status_views")
       .upsert({ status_id: id, viewer_id: userId }, { onConflict: "status_id,viewer_id" });
-  } catch {}
+  } catch (err) {
+    console.warn("Unable to record status view:", err);
+  }
 }
 
 export async function reactToStatus(id: string, userId: string, emoji: string) {

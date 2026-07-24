@@ -186,8 +186,16 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
     throw handleSupabaseError(createChatError, "Failed to create new chat. Check RLS policies on the 'chats' table.");
   }
 
+  const memberIds = Array.from(new Set([userA, userB]));
+  const memberRows = memberIds.map((userId) => ({ chat_id: newChat.id, user_id: userId }));
+  try {
+    await supabase.from("chat_members").upsert(memberRows, { onConflict: "chat_id,user_id" });
+  } catch (memberError) {
+    console.warn("Unable to register DM members:", memberError);
+  }
+
   publish("chats:changed");
-  return mapChat(newChat, [userA, userB], null);
+  return mapChat(newChat, memberIds, null);
 }
 
 export async function createGroup(input: {
