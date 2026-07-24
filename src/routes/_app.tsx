@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { AppNav } from "@/components/AppNav";
 import { PullToRefresh } from "@/components/PullToRefresh";
@@ -6,6 +7,9 @@ import { useAuth, useAuthReady } from "@/hooks/useAuth";
 import { initStore, getState } from "@/lib/mockStore";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
 import { cn } from "@/lib/utils";
+import { listChats } from "@/api/chatsApi";
+import { listChannels } from "@/api/channelsApi";
+import { listUsers } from "@/api/usersApi";
 
 export const Route = createFileRoute("/_app")({
   component: AppLayout,
@@ -15,6 +19,7 @@ function AppLayout() {
   const me = useAuth();
   const ready = useAuthReady();
   const nav = useNavigate();
+  const qc = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const isLoading = useRouterState({ select: (s) => s.status === "pending" || s.isLoading });
 
@@ -39,6 +44,15 @@ function AppLayout() {
     if (!ready || typeof window === "undefined") return;
     if (!me) nav({ to: "/auth/login" });
   }, [me, ready, nav]);
+
+  useEffect(() => {
+    if (!ready || !me || typeof window === "undefined") return;
+    void Promise.allSettled([
+      qc.prefetchQuery({ queryKey: ["users"], queryFn: listUsers, staleTime: 30_000 }),
+      qc.prefetchQuery({ queryKey: ["chats", me.id], queryFn: () => listChats(me.id), staleTime: 15_000 }),
+      qc.prefetchQuery({ queryKey: ["channels"], queryFn: listChannels, staleTime: 15_000 }),
+    ]);
+  }, [me, qc, ready]);
 
   if (!ready || !me) {
     return (

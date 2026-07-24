@@ -189,11 +189,27 @@ const empty: Store = {
 // snapshot synchronously on first paint while the app bootstraps.
 let state: Store = (typeof window !== "undefined") ? load() : empty;
 
+function isDemoStore(value: Partial<Store>): boolean {
+  const users = value.users ?? [];
+  const chats = value.chats ?? [];
+  const channels = value.channels ?? [];
+  return users.some((u) => /@demo\.app$/i.test(u.email))
+    || chats.some((c) => c.id.startsWith("chat-"))
+    || channels.some((c) => c.id.startsWith("channel-"));
+}
+
 function load(): Store {
   if (typeof window === "undefined") return empty;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...empty, ...JSON.parse(raw) };
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw);
+    const next = { ...empty, ...parsed } as Store;
+    if (isDemoStore(next)) {
+      localStorage.removeItem(STORAGE_KEY);
+      return empty;
+    }
+    return next;
   } catch {}
   return empty;
 }
