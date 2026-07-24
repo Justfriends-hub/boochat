@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { initStore } from "@/lib/mockStore";
 import { useTheme } from "@/hooks/useTheme";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { InstallPromptBanner } from "@/components/InstallPromptBanner";
 import { initOfflineStore, getAppState, setAppState } from "@/lib/offlineStore";
 
 function NotFoundComponent() {
@@ -182,6 +183,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <OfflineBanner />
+      <InstallPromptBanner />
       <RouteTracker />
       <Outlet />
       <Toaster richColors position="top-center" />

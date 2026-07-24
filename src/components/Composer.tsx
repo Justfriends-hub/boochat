@@ -36,6 +36,26 @@ export function Composer({
   const timerRef = useRef<number | null>(null);
   const shouldSendAfterStop = useRef(false);
 
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handleResize = () => {
+      if (!window.visualViewport) return;
+      const offset = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
+      setKeyboardOffset(Math.max(0, offset));
+    };
+
+    window.visualViewport.addEventListener("resize", handleResize);
+    window.visualViewport.addEventListener("scroll", handleResize);
+
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handleResize);
+      window.visualViewport?.removeEventListener("scroll", handleResize);
+    };
+  }, []);
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -181,9 +201,10 @@ export function Composer({
 
   return (
     <div
-      className="shrink-0 border-t bg-background/95 backdrop-blur z-20"
+      className="shrink-0 border-t bg-background/95 backdrop-blur z-20 transition-transform duration-100"
       style={{
-        paddingBottom: "env(safe-area-inset-bottom)",
+        transform: keyboardOffset > 0 ? `translateY(-${keyboardOffset}px)` : "none",
+        paddingBottom: keyboardOffset > 0 ? "4px" : "env(safe-area-inset-bottom)",
       }}
     >
       {replyTo && (

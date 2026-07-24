@@ -25,6 +25,7 @@ import { formatDay } from "@/lib/format";
 import { normalizeRole, type Message, type Chat } from "@/lib/mockStore";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Switch } from "@/components/ui/switch";
+import { ChatSkeleton } from "@/components/ChatSkeleton";
 import { toast } from "sonner";
 
 export function ChatView({ chatId }: { chatId: string }) {
@@ -228,11 +229,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   };
 
   if (!chat || !me) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground">
-        Loading…
-      </div>
-    );
+    return <ChatSkeleton />;
   }
 
   if (isPrivateGroup && !isApprovedMember && !canManageVisibility) {
