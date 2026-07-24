@@ -196,9 +196,6 @@ export function StoryViewer({
     }
   };
 
-  const goPrev = () => setIndex((i) => Math.max(0, i - 1));
-  const goNext = () => setIndex((i) => (i + 1 < statuses.length ? i + 1 : (onClose(), i)));
-
   return (
     <div
       ref={rootRef}
