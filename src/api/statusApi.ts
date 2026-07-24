@@ -22,6 +22,8 @@ function mapStatus(row: any): Status {
       emoji: reaction.emoji,
     })),
     storagePath: row.media_url || row.media || undefined,
+    privacyMode: row.privacy_mode ?? row.status_privacy_mode ?? undefined,
+    privacyList: row.status_privacy_list ?? row.privacy_list ?? undefined,
   };
 }
 
@@ -62,7 +64,7 @@ async function pruneExpiredStatuses() {
 
 const STATUS_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
-export async function listActiveStatuses(): Promise<Status[]> {
+export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
   try {
     await pruneExpiredStatuses();
 
@@ -88,12 +90,43 @@ export async function listActiveStatuses(): Promise<Status[]> {
         const byId = new Map(merged.map((st) => [st.id, st]));
         s.statuses = Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
       });
-      return getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
+      // apply privacy filtering for viewerId when provided
+      const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
+      if (!viewerId) return all;
+      return all.filter((st) => isVisibleTo(st, viewerId));
     }
   } catch (err) {
     console.warn("Unable to fetch active statuses online, returning cached statuses:", err);
   }
-  return getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
+  const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
+  if (!viewerId) return all;
+  return all.filter((st) => isVisibleTo(st, viewerId));
+}
+
+function areContacts(userA: string, userB: string) {
+  const s = getState();
+  return s.chats.some((c) => c.type === "dm" && c.memberIds.includes(userA) && c.memberIds.includes(userB));
+}
+
+function isVisibleTo(status: Status, viewerId: string) {
+  if (!viewerId) return true;
+  if (status.userId === viewerId) return true;
+  const mode = status.privacyMode || "public";
+  const list = status.privacyList || [];
+
+  switch (mode) {
+    case "public":
+      return true;
+    case "contacts":
+      return areContacts(status.userId, viewerId);
+    case "contacts_except":
+      return areContacts(status.userId, viewerId) && !list.includes(viewerId);
+    case "only":
+    case "only_share_with":
+      return list.includes(viewerId);
+    default:
+      return true;
+  }
 }
 
 export async function createStatus(input: {

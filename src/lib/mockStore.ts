@@ -60,6 +60,8 @@ export type Status = {
   viewedBy: string[];
   reactions: { userId: string; emoji: string }[];
   storagePath?: string;
+  privacyMode?: string; // e.g. 'public' | 'contacts' | 'contacts_except' | 'only'
+  privacyList?: string[]; // explicit allow/exclude list of userIds
 };
 
 export type Channel = {

@@ -30,8 +30,8 @@ function StatusPage() {
   const [viewerList, setViewerList] = useState<any[]>([]);
 
   const { data: statuses = [] } = useQuery({
-    queryKey: ["statuses"],
-    queryFn: listActiveStatuses,
+    queryKey: ["statuses", me?.id],
+    queryFn: () => listActiveStatuses(me?.id),
     refetchInterval: 60_000, // recompute expiry
     enabled: !!me,
   });
