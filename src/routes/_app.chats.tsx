@@ -41,7 +41,12 @@ function ChatsPage() {
     queryFn: () => (me ? listChats(me.id) : Promise.resolve([])),
     enabled: !!me,
   });
-  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers, enabled: !!me });
+  const { data: users = [], isLoading: usersLoading } = useQuery({
+    queryKey: ["users"],
+    queryFn: listUsers,
+    enabled: !!me,
+    staleTime: 30_000,
+  });
 
   useEffect(() => {
     if (!me) return;
@@ -175,6 +180,9 @@ function ChatsPage() {
                     try {
                       const c = await getOrCreateDM(me.id, u.id);
                       setNewChatOpen(false);
+                      // Refresh users list so the partner's name/avatar shows immediately
+                      qc.invalidateQueries({ queryKey: ["users"] });
+                      qc.invalidateQueries({ queryKey: ["chats", me.id] });
                       nav({ to: "/chats/$chatId", params: { chatId: c.id } });
                     } catch (error) {
                       const message = error instanceof Error ? error.message : "Failed to start chat";

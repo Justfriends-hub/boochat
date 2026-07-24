@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,46 +32,47 @@ function SettingsPage() {
   const [bio, setBio] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
 
-  if (!me) {
-    return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-background">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      </div>
-    );
-  }
+  // ─── All handlers must be defined BEFORE any conditional return ───────────
+  // This prevents React hydration mismatches (#418) where the server renders
+  // the loading spinner but the client renders the full page on first paint.
 
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !me) return;
-    e.target.value = "";
+  const handleAvatarChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !me) return;
+      e.target.value = "";
 
-    // Show local preview immediately
-    const objectUrl = URL.createObjectURL(file);
-    setAvatarPreview(objectUrl);
-    setAvatarUploading(true);
+      // Revoke any old preview
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
 
-    try {
-      await updateProfile(me.id, { avatarFile: file });
-      toast.success("Avatar updated!");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update avatar");
-      setAvatarPreview(null); // revert preview on failure
-    } finally {
-      setAvatarUploading(false);
-    }
-  };
+      const objectUrl = URL.createObjectURL(file);
+      setAvatarPreview(objectUrl);
+      setAvatarUploading(true);
 
-  const startEditing = () => {
+      try {
+        await updateProfile(me.id, { avatarFile: file });
+        toast.success("Avatar updated!");
+      } catch (err: any) {
+        toast.error(err.message || "Failed to update avatar");
+        setAvatarPreview(null); // revert preview on failure
+      } finally {
+        setAvatarUploading(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [me?.id, avatarPreview],
+  );
+
+  const startEditing = useCallback(() => {
+    if (!me) return;
     setDisplayName(me.displayName);
     setBio(me.bio ?? "");
     setEditingProfile(true);
-  };
+  }, [me]);
 
-  const cancelEditing = () => {
-    setEditingProfile(false);
-  };
+  const cancelEditing = useCallback(() => setEditingProfile(false), []);
 
-  const saveProfile = async () => {
+  const saveProfile = useCallback(async () => {
     if (!me) return;
     setSavingProfile(true);
     try {
@@ -83,7 +84,16 @@ function SettingsPage() {
     } finally {
       setSavingProfile(false);
     }
-  };
+  }, [me, displayName, bio]);
+
+  // ─── Loading guard (after hooks, before JSX that depends on `me`) ─────────
+  if (!me) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -118,9 +128,10 @@ function SettingsPage() {
                   <Loader2 className="h-6 w-6 animate-spin text-white" />
                 </div>
               )}
-              {/* Camera button — always shown on hover */}
+              {/* Camera button — shown on hover when not uploading */}
               {!avatarUploading && (
                 <button
+                  type="button"
                   onClick={() => avatarFileRef.current?.click()}
                   aria-label="Change avatar"
                   className="absolute inset-0 flex items-center justify-center rounded-full bg-black/0 group-hover:bg-black/40 transition-colors"
@@ -134,7 +145,9 @@ function SettingsPage() {
             {editingProfile ? (
               <div className="flex-1 space-y-2">
                 <div>
-                  <Label htmlFor="settings-display-name" className="text-xs text-muted-foreground">Display name</Label>
+                  <Label htmlFor="settings-display-name" className="text-xs text-muted-foreground">
+                    Display name
+                  </Label>
                   <Input
                     id="settings-display-name"
                     value={displayName}
@@ -145,7 +158,9 @@ function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="settings-bio" className="text-xs text-muted-foreground">Bio</Label>
+                  <Label htmlFor="settings-bio" className="text-xs text-muted-foreground">
+                    Bio
+                  </Label>
                   <Input
                     id="settings-bio"
                     value={bio}
@@ -156,11 +171,26 @@ function SettingsPage() {
                   />
                 </div>
                 <div className="flex gap-2 pt-1">
-                  <Button size="sm" onClick={saveProfile} disabled={savingProfile} className="h-7 text-xs gap-1">
-                    {savingProfile ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                  <Button
+                    size="sm"
+                    onClick={saveProfile}
+                    disabled={savingProfile}
+                    className="h-7 text-xs gap-1"
+                  >
+                    {savingProfile ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Check className="h-3 w-3" />
+                    )}
                     Save
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={cancelEditing} disabled={savingProfile} className="h-7 text-xs gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={cancelEditing}
+                    disabled={savingProfile}
+                    className="h-7 text-xs gap-1"
+                  >
                     <X className="h-3 w-3" /> Cancel
                   </Button>
                 </div>
@@ -170,6 +200,7 @@ function SettingsPage() {
                 <div className="flex items-center gap-2">
                   <p className="text-lg font-semibold truncate">{me.displayName}</p>
                   <button
+                    type="button"
                     onClick={startEditing}
                     aria-label="Edit profile"
                     className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
@@ -178,7 +209,9 @@ function SettingsPage() {
                   </button>
                 </div>
                 <p className="text-sm text-muted-foreground truncate">{me.email}</p>
-                {me.bio && <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{me.bio}</p>}
+                {me.bio && (
+                  <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{me.bio}</p>
+                )}
                 <p className="mt-1 text-xs uppercase tracking-wide text-primary">{me.role}</p>
               </div>
             )}
@@ -201,7 +234,7 @@ function SettingsPage() {
         </Card>
 
         {/* ── Admin panel (admin only) ── */}
-        {me.role === "admin" && (
+        {(me.role === "admin" || me.role === "superadmin") && (
           <Card className="p-4">
             <Button
               variant="outline"

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Heart, Send, Pause, Play, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Download, Share2, Trash2 } from "lucide-react";
+import { X, Heart, Send, Pause, Play, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Download, Share2, Trash2, Check } from "lucide-react";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,6 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { markStatusViewed, reactToStatus, deleteStatus } from "@/api/statusApi";
 import { getOrCreateDM } from "@/api/chatsApi";
 import { sendMessage } from "@/api/messagesApi";
-import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import type { Status, User } from "@/lib/mockStore";
 
@@ -47,9 +46,10 @@ export function StoryViewer({
   const [progress, setProgress] = useState(0);
   const [paused, setPaused] = useState(false);
   const [reply, setReply] = useState("");
+  const [replySent, setReplySent] = useState(false);
+  const [sendingReply, setSendingReply] = useState(false);
   const [mediaReady, setMediaReady] = useState(false);
   const [storyDuration, setStoryDuration] = useState(DEFAULT_DURATION_MS);
-  const navigate = useNavigate();
   const rafRef = useRef<number | null>(null);
   const startRef = useRef<number>(Date.now());
   const elapsedRef = useRef<number>(0);
@@ -74,7 +74,7 @@ export function StoryViewer({
     if (current) markStatusViewed(current.id, viewerId);
   }, [current, viewerId]);
 
-  // Reset per-story state
+  // Reset per-story state (including reply sent state)
   useEffect(() => {
     setPaused(false);
     setMediaReady(false);
@@ -82,6 +82,8 @@ export function StoryViewer({
     setProgress(0);
     elapsedRef.current = 0;
     startRef.current = Date.now();
+    setReply("");
+    setReplySent(false);
   }, [index]);
 
   // Progress loop — pauses while media not ready or user paused
@@ -218,17 +220,28 @@ export function StoryViewer({
   };
 
   const doReply = async () => {
-    if (!reply.trim() || !user) return;
-    const chat = await getOrCreateDM(viewerId, user.id);
-    await sendMessage({
-      chatId: chat.id,
-      senderId: viewerId,
-      kind: "text",
-      body: `Re: your status — ${reply}`,
-    });
-    setReply("");
-    onClose();
-    navigate({ to: "/chats/$chatId", params: { chatId: chat.id } });
+    if (!reply.trim() || !user || sendingReply) return;
+    setSendingReply(true);
+    try {
+      // Find (or create) the DM with the status poster — same as WhatsApp/Telegram:
+      // reply goes into the existing conversation without navigating away.
+      const chat = await getOrCreateDM(viewerId, user.id);
+      await sendMessage({
+        chatId: chat.id,
+        senderId: viewerId,
+        kind: "text",
+        body: reply.trim(),
+      });
+      setReply("");
+      setReplySent(true);
+      toast.success(`Message sent to ${user.displayName}`);
+      // Reset the "sent" checkmark after 2 s so the user can reply again
+      setTimeout(() => setReplySent(false), 2000);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send reply");
+    } finally {
+      setSendingReply(false);
+    }
   };
 
   return (
@@ -388,21 +401,37 @@ export function StoryViewer({
         </button>
       </div>
       {current.userId !== viewerId && (
-        <div className="flex items-center gap-2 p-3 bg-black">
+      <div className="flex items-center gap-2 p-3 bg-black">
           <label htmlFor="story-reply" className="sr-only">Reply to story</label>
           <Input
             id="story-reply"
             value={reply}
             onChange={(e) => setReply(e.target.value)}
-            placeholder="Reply to story…"
+            placeholder={`Message ${user?.displayName ?? ""}…`}
             className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
             onKeyDown={(e) => e.key === "Enter" && doReply()}
+            disabled={sendingReply}
           />
-          <Button size="icon" variant="ghost" onClick={() => doReact("❤️")} aria-label="React with heart" className="text-white hover:text-white hover:bg-white/10">
+          <Button
+            size="icon" variant="ghost"
+            onClick={() => doReact("❤️")}
+            aria-label="React with heart"
+            className="text-white hover:text-white hover:bg-white/10 shrink-0"
+          >
             <Heart className="h-5 w-5" aria-hidden="true" />
           </Button>
-          <Button size="icon" onClick={doReply} aria-label="Send reply">
-            <Send className="h-5 w-5" aria-hidden="true" />
+          <Button
+            size="icon"
+            onClick={doReply}
+            aria-label="Send reply"
+            disabled={!reply.trim() || sendingReply}
+            className="shrink-0 transition-all"
+          >
+            {replySent
+              ? <Check className="h-5 w-5" aria-hidden="true" />
+              : sendingReply
+                ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                : <Send className="h-5 w-5" aria-hidden="true" />}
           </Button>
         </div>
       )}

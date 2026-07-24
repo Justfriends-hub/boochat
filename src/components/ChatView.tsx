@@ -70,18 +70,44 @@ export function ChatView({ chatId }: { chatId: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Get other user ID for DMs
+  // ── DM partner resolution ─────────────────────────────────────────────────
+  // Step 1: derive the partner's user ID from memberIds
   const otherUserId = useMemo(() => {
     if (!chat || chat.type !== "dm" || !me) return null;
-    return chat.memberIds.find((x) => x !== me.id) || null;
+    // memberIds may be UUIDs from Supabase or string IDs from mockStore
+    return chat.memberIds.find((x) => x !== me.id) ?? null;
   }, [chat, me]);
 
-  // Fetch the other user directly for DMs
-  const { data: otherUser } = useQuery({
+  // Step 2: try the pre-loaded users list first (instant, no extra fetch)
+  const otherUserFromList = useMemo(
+    () => (otherUserId ? users.find((u) => u.id === otherUserId) ?? null : null),
+    [otherUserId, users],
+  );
+
+  // Step 3: individual fetch as a fallback if the partner isn't in the list yet
+  const { data: otherUserFetched } = useQuery({
     queryKey: ["user", otherUserId],
-    queryFn: () => otherUserId ? getUser(otherUserId) : null,
-    enabled: !!otherUserId,
+    queryFn: () => (otherUserId ? getUser(otherUserId) : null),
+    enabled: !!otherUserId && !otherUserFromList, // skip if already found in list
+    staleTime: 60_000,
   });
+
+  // The definitive partner object: list wins over individual fetch (fresher)
+  const otherUser = otherUserFromList ?? otherUserFetched ?? null;
+
+  const title = chat?.type === "group"
+    ? (chat.name || "Group")
+    : (otherUser?.displayName || otherUser?.email?.split("@")[0] || "Loading…");
+
+  const subtitle = chat?.type === "group"
+    ? `${chat.memberIds.length} member${chat.memberIds.length !== 1 ? "s" : ""}`
+    : typing
+      ? "typing…"
+      : otherUser?.online
+        ? "online"
+        : otherUser
+          ? "offline"
+          : "";
 
   useEffect(() => {
     const unsub = subscribeToChat(chatId, () => {
@@ -101,11 +127,6 @@ export function ChatView({ chatId }: { chatId: string }) {
   useEffect(() => {
     if (me) markChatRead(chatId, me.id);
   }, [chatId, me, messages.length]);
-
-  const title = chat?.type === "group" ? chat.name || "Group" : otherUser?.displayName || "Chat";
-  const subtitle = chat?.type === "group"
-    ? `${chat.memberIds.length} members`
-    : typing ? "typing…" : otherUser?.online ? "online" : "offline";
 
   const filtered = useMemo(() => {
     if (!search.trim()) return messages;
