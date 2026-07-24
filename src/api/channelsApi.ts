@@ -464,12 +464,12 @@ export async function markPostViewed(postId: string, sessionId: string) {
   try {
     const supabase = ensureSupabase();
     // Atomically increment view_count to avoid race conditions
-    const { error } = await supabase
-      .rpc("atomic_increment_post_views", { p_post_id: postId, p_amount: 1 })
-      .catch(() => ({ error: true }));
-
-    if (error && (error as any).error) {
-      console.warn("Failed to atomically increment view_count:", error);
+    try {
+      const { error } = await supabase
+        .rpc("atomic_increment_post_views", { p_post_id: postId, p_amount: 1 });
+      if (error) console.warn("Failed to atomically increment view_count:", error);
+    } catch {
+      // Silently ignore — view count increment is non-critical
     }
   } catch (error) {
     console.warn("Failed to mark post viewed:", error);

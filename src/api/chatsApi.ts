@@ -157,7 +157,7 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
 
   const { data: newChat, error: createChatError } = await supabase
     .rpc("get_or_create_dm", { _user_a: userA, _user_b: userB })
-    .single();
+    .single() as { data: any; error: any };
 
   if (createChatError || !newChat) {
     throw handleSupabaseError(createChatError, "Failed to open DM. Check RLS policies on chats/chat_members and RPC execution rights.");

@@ -107,9 +107,9 @@ async function batchGetMediaUrls(mediaUrls: string[]): Promise<string[]> {
           return mediaUrls[idx]; // Fallback to raw URL on error
         }
         // Cache for 59 minutes (signed URL is valid for 60)
-        setCachedSignedUrl(item.path, item.signedUrl, Date.now() + 59 * 60 * 1000);
-        return item.signedUrl;
-      });
+        if (item.path) setCachedSignedUrl(item.path, item.signedUrl ?? "", Date.now() + 59 * 60 * 1000);
+        return item.signedUrl ?? mediaUrls[idx];
+      }) as string[];
     } else {
       // Fallback to individual requests
       const results = await Promise.allSettled(mediaUrls.map((url) => getMediaUrl(url)));
@@ -289,12 +289,13 @@ export async function createStatus(input: {
   };
 
   try {
-    // If media is already a File or Blob, use it directly; otherwise fetch it
+    // If media is already a File or Blob, use it directly; otherwise fetch by URL string
     let blob: Blob;
-    if (input.media instanceof Blob || input.media instanceof File) {
-      blob = input.media;
+    const mediaRaw = input.media as unknown;
+    if (mediaRaw instanceof Blob || mediaRaw instanceof File) {
+      blob = mediaRaw as Blob;
     } else {
-      const response = await fetch(input.media);
+      const response = await fetch(input.media as string);
       blob = await response.blob();
     }
     const extension = blob.type.split("/")[1] || "bin";

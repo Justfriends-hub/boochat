@@ -8,8 +8,10 @@ import {
   addToOutbox,
   getOutbox,
   removeFromOutbox,
+  getPendingCount,
 } from "@/lib/offlineStore";
 import { publish } from "@/lib/eventBus";
+import { useSyncStore } from "@/stores/syncStore";
 
 function mapMessage(row: any): Message {
   const createdAt = new Date(row.created_at).getTime();
@@ -191,7 +193,12 @@ export async function syncPendingMessages() {
   const outbox = getOutbox();
   if (!outbox.length) return;
 
+  const { setSyncing, setPendingCount, markSynced } = useSyncStore.getState();
+  setSyncing(true);
+  setPendingCount(outbox.length);
+
   const supabase = ensureSupabase();
+  let syncedCount = 0;
 
   for (const pendingMsg of outbox) {
     try {
@@ -223,20 +230,32 @@ export async function syncPendingMessages() {
         saveLocalMessage(sentMsg);
         removeFromOutbox(pendingMsg.id);
         publish(`chat:${pendingMsg.chatId}`);
+        syncedCount++;
+        setPendingCount(getPendingCount());
       }
     } catch (err) {
       console.warn("Failed syncing pending message:", err);
     }
+  }
+
+  if (syncedCount > 0) {
+    markSynced();
+  } else {
+    setSyncing(false);
   }
 }
 
 // Auto-register online sync listener
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
+    useSyncStore.getState().setOnline(true);
     syncPendingMessages();
   });
+  window.addEventListener("offline", () => {
+    useSyncStore.getState().setOnline(false);
+  });
   // Trigger initial sync attempt on startup
-  setTimeout(() => syncPendingMessages(), 1000);
+  setTimeout(() => syncPendingMessages(), 1500);
 }
 
 export async function editMessage(id: string, body: string) {

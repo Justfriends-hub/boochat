@@ -288,8 +288,8 @@ export async function batchGetImageUrls(
           result[originalIdx] = path; // Fallback to raw path on error
         } else {
           const cacheKey = `${bucket}::${path}`;
-          setCached(cacheKey, item.signedUrl);
-          result[originalIdx] = item.signedUrl;
+          setCached(cacheKey, item.signedUrl ?? path);
+          result[originalIdx] = item.signedUrl ?? path;
         }
       });
     } else {

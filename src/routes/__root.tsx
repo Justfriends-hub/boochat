@@ -5,8 +5,9 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
@@ -14,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { initStore } from "@/lib/mockStore";
 import { useTheme } from "@/hooks/useTheme";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { initOfflineStore, getAppState, setAppState } from "@/lib/offlineStore";
 
 function NotFoundComponent() {
   return (
@@ -92,12 +94,60 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+/** Saves the current pathname to IndexedDB whenever it changes. */
+function RouteTracker() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const router = useRouter();
+  const didRestoreRef = useRef(false);
+
+  // On first mount: restore last visited route (offline-first "return to where you left off")
+  useEffect(() => {
+    if (didRestoreRef.current) return;
+    didRestoreRef.current = true;
+
+    getAppState<string>("lastRoute").then((saved) => {
+      if (!saved) return;
+      // Only restore deep routes (chat/group pages), not auth pages
+      const isRestorable =
+        saved.startsWith("/chats/") ||
+        saved.startsWith("/groups/") ||
+        saved.startsWith("/channels/");
+      if (!isRestorable) return;
+      // Only navigate if the current location is still the root/index
+      if (window.location.pathname === "/" || window.location.pathname === "") {
+        router.navigate({ to: saved, replace: true }).catch(() => {});
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist current route on every navigation (debounced 500 ms)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      setAppState("lastRoute", pathname).catch(() => {});
+    }, 500);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [pathname]);
+
+  return null;
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useTheme(); // initialize theme class
-  useEffect(() => { initStore(); }, []);
+
+  // Initialize mock store + offline IndexedDB cache
   useEffect(() => {
-    // PWA registration guard: never in preview/iframe/dev.
+    initStore();
+    initOfflineStore().catch(console.warn);
+  }, []);
+
+  // Register service worker (production only, never in preview/iframe/dev)
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const host = window.location.hostname;
     const inIframe = window.self !== window.top;
@@ -111,12 +161,28 @@ function RootComponent() {
       navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
       return;
     }
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((reg) => {
+        // When a new SW is waiting, activate it immediately
+        if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        reg.addEventListener("updatefound", () => {
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener("statechange", () => {
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              newWorker.postMessage({ type: "SKIP_WAITING" });
+            }
+          });
+        });
+      })
+      .catch(() => {});
   }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
       <OfflineBanner />
+      <RouteTracker />
       <Outlet />
       <Toaster richColors position="top-center" />
     </QueryClientProvider>
