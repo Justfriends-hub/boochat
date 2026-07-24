@@ -22,7 +22,7 @@ import { listUsers, getUser } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import { useUIStore } from "@/stores/uiStore";
 import { formatDay } from "@/lib/format";
-import type { Message, Chat } from "@/lib/mockStore";
+import { normalizeRole, type Message, type Chat } from "@/lib/mockStore";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
@@ -157,8 +157,11 @@ export function ChatView({ chatId }: { chatId: string }) {
   const doSend = (p: { kind: "text" | "image" | "voice"; body: string; file?: File; duration?: number }) => {
     if (!me) return;
     sendMessage({
-      chatId, senderId: me.id, kind: p.kind, body: p.body,
-      imageFile: p.file, // File object from Composer — messagesApi will compress+upload
+      chatId,
+      senderId: me.id,
+      kind: p.kind,
+      body: p.body,
+      mediaFile: p.file, // File object from Composer — messagesApi uploads the media
       duration: p.duration,
       replyTo: replyTo?.id,
     });
@@ -166,7 +169,7 @@ export function ChatView({ chatId }: { chatId: string }) {
     clearDraft(chatId);
   };
 
-  const canManageVisibility = (me?.role === "admin" || me?.role === "superadmin") || me?.id === chat?.ownerId;
+  const canManageVisibility = (normalizeRole(me?.role) === "owner" || normalizeRole(me?.role) === "member") || me?.id === chat?.ownerId;
   const isPrivateGroup = chat?.type === "group" && chat.visibility === "private";
   const isApprovedMember = !!chat && !!me && chat.memberIds.includes(me.id);
   const isPendingJoinRequest = !!chat && !!me && (chat.joinRequests ?? []).some((req) => req.userId === me.id && req.status === "pending");

@@ -54,13 +54,8 @@ export function MessageBubble({
             ) : m.kind === "image" ? (
               <img src={m.body} alt="" className="max-h-72 rounded-lg" />
             ) : m.kind === "voice" ? (
-              <div className="flex items-center gap-2 py-1">
-                <button className="grid h-8 w-8 place-items-center rounded-full bg-black/10 dark:bg-white/10">
-                  <Play className="h-4 w-4" />
-                </button>
-                <div className="h-1 w-32 rounded-full bg-black/10 dark:bg-white/10">
-                  <div className="h-1 rounded-full bg-current opacity-60" style={{ width: "30%" }} />
-                </div>
+              <div className="flex flex-col gap-2 py-1">
+                <audio controls src={m.body} className="w-full rounded-lg bg-black/5" />
                 <span className="text-xs opacity-70">
                   {String(Math.floor((m.duration || 0) / 60)).padStart(2, "0")}:
                   {String((m.duration || 0) % 60).padStart(2, "0")}

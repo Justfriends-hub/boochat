@@ -15,9 +15,9 @@ export function seed(s: Store) {
   const now = Date.now();
 
   const admin = {
-    id: "admin-1", email: "admin@demo.app", password: "admin1234",
+    id: "admin-1", email: "admin@demo.app",
     displayName: "Admin", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Admin",
-    role: "admin" as const, online: true, bio: "Super admin",
+    role: "owner" as const, online: true, bio: "Owner",
   };
   const demoUsers = [
     { name: "Alex Rivera", email: "alex@demo.app" },
@@ -29,7 +29,6 @@ export function seed(s: Store) {
   ].map((u, i) => ({
     id: `user-${i + 1}`,
     email: u.email,
-    password: "demo1234",
     displayName: u.name,
     avatar: AVATARS[i],
     role: "user" as const,

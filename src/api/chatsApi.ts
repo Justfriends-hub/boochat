@@ -141,12 +141,12 @@ export async function getChat(id: string): Promise<Chat | undefined> {
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {
   const supabase = ensureSupabase();
 
-  // Normalise: Supabase UUIDs and our mockStore IDs are both strings,
-  // but make sure we compare trimmed lowercase to avoid any case/whitespace mismatch.
   const idA = userA.trim().toLowerCase();
   const idB = userB.trim().toLowerCase();
+  if (idA === idB) {
+    throw new Error("Cannot create a DM with yourself.");
+  }
 
-  // ── 1. Check local mockStore cache first (instant, offline-friendly) ──
   const cachedDM = getState().chats.find(
     (c) =>
       c.type === "dm" &&
@@ -155,74 +155,26 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
   );
   if (cachedDM) return cachedDM;
 
-  // ── 2. Query Supabase for an existing shared DM ──
-  try {
-    const { data: userAChats, error: userAError } = await supabase
-      .from("chat_members")
-      .select("chat_id")
-      .eq("user_id", userA);
+  const { data: newChat, error: createChatError } = await supabase
+    .rpc("get_or_create_dm", { _user_a: userA, _user_b: userB })
+    .single();
 
-    if (userAError) {
-      console.warn("getOrCreateDM: failed to fetch userA chats:", userAError.message);
-    } else if (userAChats?.length) {
-      const chatIds = userAChats.map((row) => row.chat_id);
-      const { data: sharedChats, error: sharedError } = await supabase
-        .from("chat_members")
-        .select("chat_id")
-        .in("chat_id", chatIds)
-        .eq("user_id", userB);
-
-      if (sharedError) {
-        console.warn("getOrCreateDM: failed to fetch shared chats:", sharedError.message);
-      } else if (sharedChats?.length) {
-        const sharedIds = sharedChats.map((row) => row.chat_id);
-        const { data: chats, error: chatError } = await supabase
-          .from("chats")
-          .select("*")
-          .in("id", sharedIds)
-          .eq("type", "dm")
-          .limit(1);
-
-        if (chatError) {
-          console.warn("getOrCreateDM: failed to fetch DM chat row:", chatError.message);
-        } else if (chats?.length) {
-          const chat = chats[0];
-          const { data: memberRows } = await supabase
-            .from("chat_members")
-            .select("user_id")
-            .eq("chat_id", chat.id);
-          const mapped = mapChat(chat, (memberRows ?? []).map((row) => row.user_id), null);
-          // Cache it so next call is instant
-          setState((s) => {
-            if (!s.chats.find((c) => c.id === mapped.id)) s.chats.push(mapped);
-          });
-          return mapped;
-        }
-      }
-    }
-  } catch (checkError) {
-    console.warn("getOrCreateDM: unexpected error checking for existing DM:", checkError);
-  }
-
-  // ── 3. No existing DM found — create one ──
-  const { data: newChat, error: createChatError } = await supabase.rpc("create_chat", {
-    _type: "dm",
-    _name: null,
-    _avatar_url: null,
-  });
   if (createChatError || !newChat) {
-    throw handleSupabaseError(createChatError, "Failed to create new chat. Check RLS policies on the 'chats' table.");
+    throw handleSupabaseError(createChatError, "Failed to open DM. Check RLS policies on chats/chat_members and RPC execution rights.");
   }
 
-  const memberIds = Array.from(new Set([userA, userB]));
-  const memberRows = memberIds.map((userId) => ({ chat_id: newChat.id, user_id: userId }));
-  try {
-    await supabase.from("chat_members").upsert(memberRows, { onConflict: "chat_id,user_id" });
-  } catch (memberError) {
-    console.warn("getOrCreateDM: unable to register DM members:", memberError);
+  const { data: memberRows, error: memberError } = await supabase
+    .from("chat_members")
+    .select("user_id")
+    .eq("chat_id", newChat.id);
+
+  if (memberError) {
+    console.warn("getOrCreateDM: failed to load DM members:", memberError.message);
   }
 
-  const mapped = mapChat(newChat, memberIds, null);
+  const members = Array.from(new Set((memberRows ?? []).map((row) => row.user_id)));
+  const mapped = mapChat(newChat, members, null);
+
   setState((s) => {
     if (!s.chats.find((c) => c.id === mapped.id)) s.chats.push(mapped);
   });

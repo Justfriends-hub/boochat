@@ -182,6 +182,29 @@ export async function uploadImage(
   return path;
 }
 
+export async function uploadFile(
+  file: File,
+  bucket: string,
+  pathPrefix: string,
+): Promise<string> {
+  const extension = file.name.split(".").pop() || file.type.split("/").pop() || "bin";
+  const filename = `${Date.now()}.${extension}`;
+  const prefix = pathPrefix.replace(/\/$/, "");
+  const path = `${prefix}/${filename}`;
+
+  const supabase = ensureSupabase();
+  const { error } = await supabase.storage.from(bucket).upload(path, file, {
+    contentType: file.type,
+    upsert: false,
+  });
+
+  if (error) {
+    throw new Error(`Storage upload failed (${bucket}/${path}): ${error.message}`);
+  }
+
+  return path;
+}
+
 // ─── URL Resolution ───────────────────────────────────────────────────────────
 
 /**
@@ -227,23 +250,72 @@ export async function getImageUrl(bucket: string, path: string): Promise<string>
 }
 
 /**
- * Batch-resolves an array of storage paths to URLs.
- * Runs in parallel; any individual failure falls back to the raw path.
+ * Batch-resolves an array of storage paths to signed URLs using Supabase batch API.
+ * Significantly more efficient than calling createSignedUrl per file.
  */
 export async function batchGetImageUrls(
   bucket: string,
   paths: (string | undefined | null)[],
 ): Promise<(string | undefined)[]> {
-  return Promise.all(
-    paths.map(async (p) => {
-      if (!p) return undefined;
-      try {
-        return await getImageUrl(bucket, p);
-      } catch {
-        return p;
-      }
-    }),
-  );
+  // Filter out nulls/undefined, track original indices
+  const validPaths: Array<{ idx: number; path: string }> = [];
+  const result: (string | undefined)[] = new Array(paths.length);
+
+  paths.forEach((p, idx) => {
+    if (p) {
+      validPaths.push({ idx, path: p });
+      result[idx] = undefined;
+    }
+  });
+
+  if (!validPaths.length) return result;
+
+  try {
+    const supabase = ensureSupabase();
+    
+    // Use Supabase batch API for all signed URLs in one request
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrls(validPaths.map((vp) => vp.path), SIGNED_URL_TTL_SECONDS);
+
+    if (!error && data) {
+      // Map results back to original indices
+      data.forEach((item, idx) => {
+        const originalIdx = validPaths[idx].idx;
+        const path = validPaths[idx].path;
+        
+        if (item.error) {
+          result[originalIdx] = path; // Fallback to raw path on error
+        } else {
+          const cacheKey = `${bucket}::${path}`;
+          setCached(cacheKey, item.signedUrl);
+          result[originalIdx] = item.signedUrl;
+        }
+      });
+    } else {
+      // If batch fails, fall back to individual requests
+      const fallback = await Promise.all(
+        validPaths.map(async (vp) => {
+          try {
+            return await getImageUrl(bucket, vp.path);
+          } catch {
+            return vp.path;
+          }
+        }),
+      );
+      
+      validPaths.forEach((vp, idx) => {
+        result[vp.idx] = fallback[idx];
+      });
+    }
+  } catch {
+    // Fallback: return raw paths
+    validPaths.forEach((vp) => {
+      result[vp.idx] = vp.path;
+    });
+  }
+
+  return result;
 }
 
 /**

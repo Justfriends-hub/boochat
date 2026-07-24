@@ -1,15 +1,19 @@
 import { ensureSupabase, supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl } from "@/lib/imageUpload";
 import { publish, subscribe } from "@/lib/eventBus";
-import type { User } from "@/lib/mockStore";
+import { normalizeRole, type User } from "@/lib/mockStore";
+import { startPresence, stopPresence } from "@/lib/presence";
 
 let cachedUser: User | null = null;
 let authReady = false;
 let initializePromise: Promise<void> | null = null;
+let activePresenceUserId: string | null = null;
+let activePresenceCleanup: (() => void) | null = null;
+let authStateSubscription: { data: { subscription: { unsubscribe: () => void } } } | null = null;
 
 function toUser(profile: any, roles: Array<{ role: string }> | null = null): User {
-  const roleStr = roles?.[0]?.role ?? "user";
-  const role = roleStr === "superadmin" ? "superadmin" : roleStr === "admin" ? "admin" : "user";
+  const roleStr = roles?.[0]?.role ?? profile.role ?? "user";
+  const role = normalizeRole(roleStr);
   // avatar_url may be a storage path (e.g. "userId/123.jpg") or a full https:// URL.
   // getImageUrl handles both: passes through https:// links, resolves storage paths.
   const rawAvatar = profile.avatar_url || "";
@@ -26,7 +30,6 @@ function toUser(profile: any, roles: Array<{ role: string }> | null = null): Use
     online: profile.online ?? false,
     banned: profile.banned ?? false,
     bio: profile.bio ?? undefined,
-    password: profile.password ?? "",
     // Carry the raw path so callers can resolve it if needed
     _avatarPath: rawAvatar && !/^https?:\/\//i.test(rawAvatar) ? rawAvatar : undefined,
   } as User & { _avatarPath?: string };
@@ -46,6 +49,68 @@ async function resolveAvatarUrl(profile: any): Promise<string> {
 function publishAuthChange() {
   authReady = true;
   publish("auth:changed");
+}
+
+async function setProfileOnlineStatus(userId: string | null, online: boolean) {
+  if (!userId) return;
+  try {
+    const client = ensureSupabase();
+    await client.from("profiles").update({ online }).eq("id", userId);
+  } catch {
+    // best-effort only
+  }
+}
+
+function cleanupPresence() {
+  if (activePresenceCleanup) {
+    try {
+      stopPresence(activePresenceCleanup);
+    } catch {}
+    activePresenceCleanup = null;
+  }
+  activePresenceUserId = null;
+}
+
+async function bindPresence(userId: string | null) {
+  if (!userId) {
+    if (activePresenceUserId) {
+      try {
+        const client = ensureSupabase();
+        await client.from("profiles").update({ online: false }).eq("id", activePresenceUserId);
+      } catch {}
+    }
+    cleanupPresence();
+    return;
+  }
+
+  if (activePresenceUserId === userId && activePresenceCleanup) return;
+
+  if (activePresenceUserId && activePresenceUserId !== userId) {
+    try {
+      const client = ensureSupabase();
+      await client.from("profiles").update({ online: false }).eq("id", activePresenceUserId);
+    } catch {}
+  }
+
+  cleanupPresence();
+
+  try {
+    // startPresence returns a cleanup function; it will call onProfileUpdate when the DB emits changes
+    const cleanupFn = await startPresence(userId, (newProfile: any) => {
+      try {
+        if (cachedUser && newProfile && newProfile.id === cachedUser.id) {
+          const nextUser = toUser(newProfile);
+          cachedUser = nextUser;
+          publishAuthChange();
+        }
+      } catch {}
+    });
+
+    activePresenceCleanup = cleanupFn;
+    activePresenceUserId = userId;
+  } catch {
+    cleanupPresence();
+  }
 }
 
 export function subscribeAuth(cb: () => void) {
@@ -74,58 +139,24 @@ export async function initializeAuth() {
         publishAuthChange();
       }
 
-        // Mark profile online when we have an active session and subscribe to profile changes
-        if (sessionData.session?.user?.id) {
-          try {
-            // Attempt to mark the profile as online (best-effort)
-            await client.from("profiles").update({ online: true }).eq("id", sessionData.session.user.id);
-          } catch (err) {
-            // ignore
-          }
+      await bindPresence(sessionData.session?.user?.id ?? null);
 
-          // Subscribe to postgres changes for this profile so online state updates propagate
-          try {
-            const presenceChannel = client.channel(`profile:${sessionData.session.user.id}`);
-            presenceChannel.on(
-              "postgres_changes",
-              { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${sessionData.session.user.id}` },
-              (payload) => {
-                try {
-                  const newProfile = payload.new as any;
-                  if (cachedUser && newProfile && newProfile.id === cachedUser.id) {
-                    cachedUser = toUser(newProfile);
-                    publishAuthChange();
-                  }
-                } catch (e) {}
-              },
-            );
-            presenceChannel.subscribe();
-
-            if (typeof window !== "undefined") {
-              // On page unload, attempt to mark offline for this session (best-effort)
-              const onUnload = async () => {
-                try {
-                  await client.from("profiles").update({ online: false }).eq("id", sessionData.session.user.id);
-                } catch {}
-              };
-              window.addEventListener("beforeunload", onUnload);
-            }
-          } catch (err) {
-            // ignore presence subscription failures
-          }
-        }
-
-        client.auth.onAuthStateChange(async (_event, session) => {
+      if (!authStateSubscription) {
+        authStateSubscription = client.auth.onAuthStateChange(async (event, session) => {
+          // Only refresh profile on sign-in or user update, not on every token refresh
+          const shouldRefresh = event === "SIGNED_IN" || event === "USER_UPDATED";
           if (session?.user?.id) {
-            await refreshCurrentUser(session.user.id);
-            try { await client.from("profiles").update({ online: true }).eq("id", session.user.id); } catch {};
+            if (shouldRefresh) {
+              await refreshCurrentUser(session.user.id);
+            }
+            await bindPresence(session.user.id);
           } else {
-            // mark previous cached user offline if possible
-            try { if (cachedUser && supabase) { await supabase.from("profiles").update({ online: false }).eq("id", cachedUser.id); } } catch {};
+            await bindPresence(null);
             cachedUser = null;
             publishAuthChange();
           }
         });
+      }
     } catch (error) {
       console.warn("Unable to initialize auth:", error);
       cachedUser = null;
@@ -252,7 +283,6 @@ export async function signUp(input: {
     avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(input.email)}`,
     role: "user",
     online: false,
-    password: "",
   };
 }
 
@@ -282,6 +312,7 @@ export async function signOut() {
   } catch (error) {
     console.warn("Supabase sign-out warning:", error);
   } finally {
+    await bindPresence(null);
     cachedUser = null;
     authReady = true;
     publishAuthChange();

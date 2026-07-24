@@ -403,38 +403,11 @@ export async function createPost(input: {
 export async function togglePostLike(postId: string, userId: string) {
   try {
     const supabase = ensureSupabase();
-    
-    // Check if user already liked
-    const { data: existing, error: checkError } = await supabase
-      .from("channel_post_reactions")
-      .select("*")
-      .eq("post_id", postId)
-      .eq("user_id", userId)
-      .eq("emoji", "❤️")
-      .single();
 
-    if (checkError && checkError.code !== "PGRST116") {
-      throw checkError;
-    }
+    const { error } = await supabase
+      .rpc("toggle_channel_post_like", { p_post_id: postId, p_user_id: userId });
 
-    if (existing) {
-      // Remove like
-      const { error: deleteError } = await supabase
-        .from("channel_post_reactions")
-        .delete()
-        .eq("post_id", postId)
-        .eq("user_id", userId)
-        .eq("emoji", "❤️");
-
-      if (deleteError) throw deleteError;
-    } else {
-      // Add like
-      const { error: insertError } = await supabase
-        .from("channel_post_reactions")
-        .insert([{ post_id: postId, user_id: userId, emoji: "❤️" }]);
-
-      if (insertError) throw insertError;
-    }
+    if (error) throw error;
 
     publish("channels:changed");
   } catch (error) {
@@ -445,21 +418,13 @@ export async function togglePostLike(postId: string, userId: string) {
 export async function markPostViewed(postId: string, sessionId: string) {
   try {
     const supabase = ensureSupabase();
-    
-    // Update post view count
-    const { data: post } = await supabase
-      .from("channel_posts")
-      .select("view_count")
-      .eq("id", postId)
-      .single();
+    // Atomically increment view_count to avoid race conditions
+    const { error } = await supabase
+      .rpc("atomic_increment_post_views", { p_post_id: postId, p_amount: 1 })
+      .catch(() => ({ error: true }));
 
-    if (post) {
-      const { error } = await supabase
-        .from("channel_posts")
-        .update({ view_count: (post.view_count || 0) + 1 })
-        .eq("id", postId);
-
-      if (error) console.warn("Failed to mark view:", error);
+    if (error && (error as any).error) {
+      console.warn("Failed to atomically increment view_count:", error);
     }
   } catch (error) {
     console.warn("Failed to mark post viewed:", error);
@@ -574,37 +539,95 @@ export async function requestJoinChannel(channelId: string, userId: string) {
     throw new Error("Your join request is already pending approval.");
   }
 
-  setState((s) => {
-    const target = s.channels.find((item) => item.id === channelId);
-    if (!target) return;
-    target.joinRequests = [
-      ...(target.joinRequests ?? []),
-      { userId, requestedAt: Date.now(), status: "pending" },
-    ];
-  });
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("join_requests")
+      .insert([{ channel_id: channelId, user_id: userId, requested_at: new Date().toISOString(), status: "pending" }])
+      .select()
+      .single();
 
-  publish("channels:changed");
+    if (error) {
+      // If conflict or constraint error, surface a friendly message
+      throw new Error(error.message || "Failed to create join request");
+    }
+
+    // Reflect in local state
+    setState((s) => {
+      const target = s.channels.find((item) => item.id === channelId);
+      if (!target) return;
+      target.joinRequests = [
+        ...(target.joinRequests ?? []),
+        { userId, requestedAt: Date.now(), status: "pending" },
+      ];
+    });
+
+    publish("channels:changed");
+  } catch (err) {
+    console.error("Failed to request join via Supabase, falling back to local cache:", err);
+    // Fallback to local state so the UI remains responsive
+    setState((s) => {
+      const target = s.channels.find((item) => item.id === channelId);
+      if (!target) return;
+      target.joinRequests = [
+        ...(target.joinRequests ?? []),
+        { userId, requestedAt: Date.now(), status: "pending" },
+      ];
+    });
+    publish("channels:changed");
+  }
 }
 
 export async function approveJoinChannelRequest(channelId: string, userId: string) {
-  setState((s) => {
-    const target = s.channels.find((item) => item.id === channelId);
-    if (!target) return;
-    target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
-    if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
-  });
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase.rpc("approve_join_request", { p_channel_id: channelId, p_user_id: userId });
+    if (error) throw error;
 
-  publish("channels:changed");
+    // Update local cache
+    setState((s) => {
+      const target = s.channels.find((item) => item.id === channelId);
+      if (!target) return;
+      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+      if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
+    });
+
+    publish("channels:changed");
+  } catch (err) {
+    console.error("Failed to approve join request via RPC:", err);
+    // As a fallback attempt a best-effort local update
+    setState((s) => {
+      const target = s.channels.find((item) => item.id === channelId);
+      if (!target) return;
+      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+      if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
+    });
+    publish("channels:changed");
+  }
 }
 
 export async function rejectJoinChannelRequest(channelId: string, userId: string) {
-  setState((s) => {
-    const target = s.channels.find((item) => item.id === channelId);
-    if (!target) return;
-    target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
-  });
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase.rpc("reject_join_request", { p_channel_id: channelId, p_user_id: userId });
+    if (error) throw error;
 
-  publish("channels:changed");
+    setState((s) => {
+      const target = s.channels.find((item) => item.id === channelId);
+      if (!target) return;
+      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+    });
+
+    publish("channels:changed");
+  } catch (err) {
+    console.error("Failed to reject join request via RPC:", err);
+    setState((s) => {
+      const target = s.channels.find((item) => item.id === channelId);
+      if (!target) return;
+      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+    });
+    publish("channels:changed");
+  }
 }
 
 

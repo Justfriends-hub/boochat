@@ -2,11 +2,34 @@
 // All *Api modules read/write here. Swap for Supabase later without changing consumers.
 import { publish } from "./eventBus";
 
-export type Role = "user" | "admin" | "superadmin";
+export type Role = "user" | "member" | "owner";
+
+export function normalizeRole(role?: string | null): Role {
+  const normalized = (role ?? "user").toLowerCase();
+  switch (normalized) {
+    case "owner":
+    case "superadmin":
+      return "owner";
+    case "member":
+    case "admin":
+      return "member";
+    default:
+      return "user";
+  }
+}
+
+export function canAccessAdminPanel(role?: string | null): boolean {
+  return normalizeRole(role) === "owner";
+}
+
+export function hasModeratorAccess(role?: string | null): boolean {
+  const normalized = normalizeRole(role);
+  return normalized === "owner" || normalized === "member";
+}
+
 export type User = {
   id: string;
   email: string;
-  password: string;
   displayName: string;
   avatar: string;
   role: Role;
@@ -23,6 +46,7 @@ export type Message = {
   senderId: string;
   kind: MessageKind;
   body: string; // text content, voice URL, or display URL for images
+  caption?: string; // optional user-provided caption for media messages
   imagePath?: string; // Supabase Storage path for image messages (private bucket)
   duration?: number; // voice seconds
   createdAt: number;
@@ -183,10 +207,20 @@ function save() {
 }
 
 export function getState(): Store { return state; }
+function cloneStore(value: Store): Store {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value) as Store;
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
 export function setState(mutator: (s: Store) => void) {
-  mutator(state);
+  const nextState = cloneStore(state);
+  mutator(nextState);
+  state = nextState;
   save();
 }
+
 
 export function initStore() {
   if (typeof window === "undefined") return;

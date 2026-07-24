@@ -8,6 +8,7 @@ import { markStatusViewed, reactToStatus, deleteStatus } from "@/api/statusApi";
 import { getOrCreateDM } from "@/api/chatsApi";
 import { sendMessage } from "@/api/messagesApi";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/utils";
 import type { Status, User } from "@/lib/mockStore";
 
 const DEFAULT_DURATION_MS = 5000;
@@ -157,7 +158,13 @@ export function StoryViewer({
   if (!current) return null;
 
   const goPrev = () => setIndex((i) => Math.max(0, i - 1));
-  const goNext = () => setIndex((i) => (i + 1 < statuses.length ? i + 1 : (onClose(), i)));
+  const goNext = () => {
+    if (index + 1 < statuses.length) {
+      setIndex(index + 1);
+    } else {
+      onClose();
+    }
+  };
 
   const viewCount = current.viewedBy.length;
   const likeCount = current.reactions.length;
@@ -237,8 +244,8 @@ export function StoryViewer({
       toast.success(`Message sent to ${user.displayName}`);
       // Reset the "sent" checkmark after 2 s so the user can reply again
       setTimeout(() => setReplySent(false), 2000);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to send reply");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to send reply"));
     } finally {
       setSendingReply(false);
     }

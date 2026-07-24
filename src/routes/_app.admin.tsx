@@ -34,7 +34,7 @@ import { listUsers } from "@/api/usersApi";
 import { listPosts, listChannels, subscribeToChannels } from "@/api/channelsApi";
 import { subscribeToChats } from "@/api/chatsApi";
 import { listActiveStatuses } from "@/api/statusApi";
-import { getState } from "@/lib/mockStore";
+import { getState, normalizeRole } from "@/lib/mockStore";
 import { subscribe } from "@/lib/eventBus";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -75,7 +75,7 @@ function toDayEnd(s: string) { return s ? new Date(s + "T23:59:59.999").getTime(
 
 function AdminPage() {
   const me = useAuth();
-  const nav = useNavigate({ from: "/admin" });
+  const nav = useNavigate({ from: "/chats" });
   const search = Route.useSearch();
   const qc = useQueryClient();
   const [boostFor, setBoostFor] = useState<string | null>(null);
@@ -84,7 +84,7 @@ function AdminPage() {
   const [editChannelOpen, setEditChannelOpen] = useState<string | null>(null);
 
   useEffect(() => {
-    if (me && me.role !== "admin" && me.role !== "superadmin") nav({ to: "/chats" });
+    if (me && normalizeRole(me.role) !== "owner") nav({ to: "/chats" });
   }, [me, nav]);
   useEffect(() => { seedAdminExtras(); }, []);
 
@@ -155,7 +155,7 @@ function AdminPage() {
     });
   }, [boosts, users, search.bo_user, search.bo_kind, search.bo_from, search.bo_to]);
 
-  if (!me || (me.role !== "admin" && me.role !== "superadmin")) return null;
+  if (!me || normalizeRole(me.role) !== "owner") return null;
 
   const statCards = [
     { label: "Users", value: stats?.users || 0, icon: Users },
@@ -223,11 +223,11 @@ function AdminPage() {
                       <TableCell>{u.email}</TableCell>
                       <TableCell>
                         <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                          u.role === "superadmin" ? "bg-purple-100 text-purple-700" :
-                          u.role === "admin" ? "bg-blue-100 text-blue-700" :
+                          normalizeRole(u.role) === "owner" ? "bg-purple-100 text-purple-700" :
+                          normalizeRole(u.role) === "member" ? "bg-blue-100 text-blue-700" :
                           "bg-muted text-muted-foreground"
                         }`}>
-                          {u.role}
+                          {normalizeRole(u.role)}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -693,8 +693,8 @@ function EditUserDialog({ userId, users, adminId, onClose, onSaved }: {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="user">User</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="superadmin">Super Admin</SelectItem>
+                <SelectItem value="member">Member</SelectItem>
+                <SelectItem value="owner">Owner</SelectItem>
               </SelectContent>
             </Select>
           </div>

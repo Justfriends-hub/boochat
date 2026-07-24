@@ -92,8 +92,33 @@ async function getMediaUrl(mediaUrl: string) {
 // Batch sign multiple media URLs in parallel instead of sequential
 async function batchGetMediaUrls(mediaUrls: string[]): Promise<string[]> {
   if (!mediaUrls.length) return [];
-  const results = await Promise.allSettled(mediaUrls.map((url) => getMediaUrl(url)));
-  return results.map((result, idx) => (result.status === "fulfilled" ? result.value : mediaUrls[idx]));
+
+  try {
+    const supabase = ensureSupabase();
+    
+    // Use Supabase batch API for all signed URLs in one request
+    const { data, error } = await supabase.storage
+      .from(STATUS_BUCKET)
+      .createSignedUrls(mediaUrls, 60 * 60);
+
+    if (!error && data) {
+      return data.map((item, idx) => {
+        if (item.error) {
+          return mediaUrls[idx]; // Fallback to raw URL on error
+        }
+        // Cache for 59 minutes (signed URL is valid for 60)
+        setCachedSignedUrl(item.path, item.signedUrl, Date.now() + 59 * 60 * 1000);
+        return item.signedUrl;
+      });
+    } else {
+      // Fallback to individual requests
+      const results = await Promise.allSettled(mediaUrls.map((url) => getMediaUrl(url)));
+      return results.map((result, idx) => (result.status === "fulfilled" ? result.value : mediaUrls[idx]));
+    }
+  } catch {
+    // Fallback: return raw URLs
+    return mediaUrls;
+  }
 }
 
 async function deleteStatusMedia(status?: Pick<Status, "media" | "storagePath">) {
@@ -122,10 +147,33 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
     await pruneExpiredStatuses();
 
     const supabase = ensureSupabase();
-    const { data, error } = await supabase
+    let visibleStatusIds: string[] | null = null;
+
+    try {
+      const { data: ids, error: rpcError } = await supabase.rpc("visible_status_ids", {
+        viewer_id: viewerId ?? null,
+      });
+      if (!rpcError && ids) {
+        visibleStatusIds = ids as string[];
+      }
+    } catch {
+      visibleStatusIds = null;
+    }
+
+    // Compute client-side cutoff timestamp (ISO format) so PostgREST uses proper comparison
+    const nowIso = new Date().toISOString();
+    const query = supabase
       .from("statuses")
       .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
-      .or("expires_at.gt.now(),expires_at.is.null");
+      .or(`expires_at.gt.${nowIso},expires_at.is.null`);
+
+    if (visibleStatusIds?.length) {
+      query.in("id", visibleStatusIds);
+    } else if (viewerId && visibleStatusIds?.length === 0) {
+      return [];
+    }
+
+    const { data, error } = await query;
 
     if (!error && data) {
       const statuses = (data ?? []).map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
@@ -156,7 +204,6 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
         s.statuses = Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
       });
       
-      // apply privacy filtering for viewerId when provided
       const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
       if (!viewerId) return all;
       return all.filter((st) => isVisibleTo(st, viewerId));
@@ -196,13 +243,13 @@ function isVisibleTo(status: Status, viewerId: string) {
 }
 
 export async function createStatus(input: {
-  userId: string; kind: "image" | "video"; media: string; caption?: string;
+  userId: string; kind: "image" | "video"; media: File | Blob | string; caption?: string;
 }): Promise<Status> {
   const newStatus: Status = {
     id: uid(),
     userId: input.userId,
     kind: input.kind,
-    media: input.media,
+    media: typeof input.media === "string" ? input.media : "",
     caption: input.caption,
     createdAt: Date.now(),
     viewedBy: [],
@@ -210,8 +257,14 @@ export async function createStatus(input: {
   };
 
   try {
-    const response = await fetch(input.media);
-    const blob = await response.blob();
+    // If media is already a File or Blob, use it directly; otherwise fetch it
+    let blob: Blob;
+    if (input.media instanceof Blob || input.media instanceof File) {
+      blob = input.media;
+    } else {
+      const response = await fetch(input.media);
+      blob = await response.blob();
+    }
     const extension = blob.type.split("/")[1] || "bin";
     const path = `${input.userId}/${Date.now()}.${extension}`;
 

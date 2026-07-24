@@ -62,25 +62,23 @@ function StatusPage() {
   const recent = others.filter((s) => !s.viewedBy.includes(me.id));
   const viewed = others.filter((s) => s.viewedBy.includes(me.id));
 
-  const upload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const upload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f || !me) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        await createStatus({
-          userId: me.id,
-          kind: f.type.startsWith("video/") ? "video" : "image",
-          media: String(reader.result),
-        });
-        qc.invalidateQueries({ queryKey: ["statuses"] });
-        toast.success("Status update added!");
-      } catch (err: any) {
-        toast.error(err.message || "Failed to upload status");
-      }
-    };
-    reader.readAsDataURL(f);
-    e.target.value = "";
+
+    try {
+      await createStatus({
+        userId: me.id,
+        kind: f.type.startsWith("video/") ? "video" : "image",
+        media: f,
+      });
+      qc.invalidateQueries({ queryKey: ["statuses"] });
+      toast.success("Status update added!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to upload status");
+    } finally {
+      e.target.value = "";
+    }
   };
 
   const openViewer = (list: any[], idx: number) => {

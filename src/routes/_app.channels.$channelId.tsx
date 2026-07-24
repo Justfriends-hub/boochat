@@ -16,7 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useUIStore } from "@/stores/uiStore";
 import { timeAgo } from "@/lib/format";
 import { toast } from "sonner";
-import type { ChannelPost } from "@/lib/mockStore";
+import { normalizeRole, type ChannelPost } from "@/lib/mockStore";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
@@ -67,7 +67,7 @@ function ChannelPage() {
     setShareLink(channel?.visibility === "private" ? "" : `${baseUrl}/join/${channelId}`);
   }, [channelId, channel?.visibility]);
 
-  const isSuperAdmin = me.role === "admin" || me.role === "superadmin";
+  const isSuperAdmin = normalizeRole(me.role) === "owner" || normalizeRole(me.role) === "member";
   const isOwner = channel?.ownerId === me.id;
   const isAdmin = channel?.adminIds?.includes(me.id);
   const canPost = isSuperAdmin || isOwner || isAdmin;

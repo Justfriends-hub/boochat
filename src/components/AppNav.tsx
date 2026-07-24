@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { MessageCircle, Circle, Radio, Users, Phone, Settings, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { normalizeRole } from "@/lib/mockStore";
 
 const items = [
   { to: "/chats", label: "Chats", icon: MessageCircle },
@@ -16,7 +17,7 @@ export function AppNav() {
   const user = useAuth();
   const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const nav = [...items];
-  if (user?.role === "admin") nav.push({ to: "/admin", label: "Admin", icon: ShieldCheck } as any);
+  if (normalizeRole(user?.role) === "owner") nav.push({ to: "/admin", label: "Admin", icon: ShieldCheck } as any);
 
   const isDetailRoute = typeof pathname === "string" && (
     (pathname.startsWith("/chats/") && pathname !== "/chats") ||

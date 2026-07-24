@@ -1,19 +1,25 @@
 // Offline-first local storage cache & outbox queue manager
-import type { Message, Chat } from "./mockStore";
+import type { Message } from "./mockStore";
 
-const CACHE_MESSAGES_KEY = "meshly.cache.messages.v1";
+const CACHE_MESSAGES_KEY_PREFIX = "meshly.cache.messages.v1";
 const OUTBOX_KEY = "meshly.outbox.v1";
+const MESSAGE_CACHE_LIMIT = 300;
 
-type CachedMessagesMap = Record<string, Message[]>; // chatId -> messages
+function getCacheKey(chatId: string) {
+  return `${CACHE_MESSAGES_KEY_PREFIX}.${chatId}`;
+}
 
-// Reads all cached messages from localStorage
+function capMessages(messages: Message[]) {
+  const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt);
+  return sorted.length > MESSAGE_CACHE_LIMIT ? sorted.slice(sorted.length - MESSAGE_CACHE_LIMIT) : sorted;
+}
+
+// Reads cached messages for a single chat from localStorage
 export function getCachedMessages(chatId: string): Message[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(CACHE_MESSAGES_KEY);
-    if (!raw) return [];
-    const map: CachedMessagesMap = JSON.parse(raw);
-    return map[chatId] || [];
+    const raw = localStorage.getItem(getCacheKey(chatId));
+    return raw ? (JSON.parse(raw) as Message[]) : [];
   } catch {
     return [];
   }
@@ -23,23 +29,16 @@ export function getCachedMessages(chatId: string): Message[] {
 export function setCachedMessages(chatId: string, messages: Message[]) {
   if (typeof window === "undefined") return;
   try {
-    const raw = localStorage.getItem(CACHE_MESSAGES_KEY);
-    const map: CachedMessagesMap = raw ? JSON.parse(raw) : {};
-    
-    // Merge existing pending/local messages with fresh remote messages
-    const existing = map[chatId] || [];
+    const existing = getCachedMessages(chatId);
     const pendingMsgs = existing.filter((m) => m.status === "pending");
-    
-    // Combine remote messages + pending outbox messages without duplicates
+
     const combinedMap = new Map<string, Message>();
     messages.forEach((m) => combinedMap.set(m.id, m));
     pendingMsgs.forEach((m) => {
       if (!combinedMap.has(m.id)) combinedMap.set(m.id, m);
     });
 
-    const finalMsgs = Array.from(combinedMap.values()).sort((a, b) => a.createdAt - b.createdAt);
-    map[chatId] = finalMsgs;
-    localStorage.setItem(CACHE_MESSAGES_KEY, JSON.stringify(map));
+    localStorage.setItem(getCacheKey(chatId), JSON.stringify(capMessages(Array.from(combinedMap.values()))));
   } catch (err) {
     console.warn("Failed to write to local offline storage:", err);
   }
@@ -49,18 +48,16 @@ export function setCachedMessages(chatId: string, messages: Message[]) {
 export function saveLocalMessage(msg: Message) {
   if (typeof window === "undefined") return;
   try {
-    const raw = localStorage.getItem(CACHE_MESSAGES_KEY);
-    const map: CachedMessagesMap = raw ? JSON.parse(raw) : {};
-    const chatMsgs = map[msg.chatId] || [];
-    
+    const chatMsgs = getCachedMessages(msg.chatId);
     const idx = chatMsgs.findIndex((m) => m.id === msg.id);
+
     if (idx >= 0) {
       chatMsgs[idx] = msg;
     } else {
       chatMsgs.push(msg);
     }
-    map[msg.chatId] = chatMsgs.sort((a, b) => a.createdAt - b.createdAt);
-    localStorage.setItem(CACHE_MESSAGES_KEY, JSON.stringify(map));
+
+    localStorage.setItem(getCacheKey(msg.chatId), JSON.stringify(capMessages(chatMsgs)));
   } catch (err) {
     console.warn("Failed to save local message:", err);
   }
@@ -84,7 +81,7 @@ export function getOutbox(): Message[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(OUTBOX_KEY);
-    return raw ? JSON.parse(raw) : [];
+    return raw ? (JSON.parse(raw) as Message[]) : [];
   } catch {
     return [];
   }

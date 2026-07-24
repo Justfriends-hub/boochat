@@ -1,5 +1,5 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
-import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
+import { uploadImage, uploadFile, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 import type { Message, MessageKind } from "@/lib/mockStore";
 import {
   getCachedMessages,
@@ -56,12 +56,12 @@ export async function listMessages(chatId: string): Promise<Message[]> {
       if (!error && data) {
         const remoteMsgs = data.map(mapMessage);
 
-        // Batch-resolve image_path values to signed URLs for image messages
-        const imagePaths = remoteMsgs.map((m) => m.imagePath ?? null);
-        const imageUrls = await batchGetImageUrls("chat-media", imagePaths);
+        // Batch-resolve storage paths to signed URLs for image and voice playback
+        const mediaPaths = remoteMsgs.map((m) => m.imagePath ?? null);
+        const mediaUrls = await batchGetImageUrls("chat-media", mediaPaths);
         const resolved = remoteMsgs.map((m, i) => {
-          if (m.kind === "image" && imageUrls[i]) {
-            return { ...m, body: imageUrls[i] as string };
+          if ((m.kind === "image" || m.kind === "voice") && mediaUrls[i]) {
+            return { ...m, body: mediaUrls[i] as string };
           }
           return m;
         });
@@ -83,34 +83,40 @@ export async function sendMessage(input: {
   senderId: string;
   kind: MessageKind;
   body: string;
-  /** Optional image File — will be compressed and uploaded to chat-media bucket. */
-  imageFile?: File;
+  /** Optional media File — image or voice audio. */
+  mediaFile?: File;
   duration?: number;
   replyTo?: string;
   forwardedFrom?: string;
 }): Promise<Message> {
-  // If an image file is provided, upload it first before creating the optimistic message
+  // If a media file is provided, upload it first before creating the optimistic message
   let imagePath: string | undefined;
   let imageDisplayUrl: string | undefined;
 
-  if (input.imageFile) {
-    // Upload immediately — if this fails, we throw before creating a pending message
-    // (prevents a stuck "pending" message with no image)
+  if (input.mediaFile) {
     try {
-      imagePath = await uploadImage(input.imageFile, "chat-media", `${input.chatId}`);
+      if (input.kind === "image") {
+        imagePath = await uploadImage(input.mediaFile, "chat-media", `${input.chatId}`);
+      } else {
+        imagePath = await uploadFile(input.mediaFile, "chat-media", `${input.chatId}`);
+      }
       imageDisplayUrl = await getImageUrl("chat-media", imagePath);
     } catch (err: any) {
-      throw new Error(err.message || "Failed to upload image");
+      throw new Error(err.message || "Failed to upload media");
     }
   }
+  // Capture caption (if any) separately so we don't accidentally persist
+  // local preview URLs (blob:) or signed display URLs as the message body.
+  const caption = input.mediaFile ? (input.body && input.body.trim() ? input.body : undefined) : undefined;
 
   const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const pendingMsg: Message = {
     id: tempId,
     chatId: input.chatId,
     senderId: input.senderId,
-    kind: input.imageFile ? "image" : input.kind,
-    body: imageDisplayUrl ?? input.body, // use signed URL for immediate display
+    kind: input.kind,
+    body: imageDisplayUrl ?? input.body, // local preview URL for image/voice or plain text
+    caption,
     imagePath,
     duration: input.duration,
     replyTo: input.replyTo,
@@ -132,11 +138,17 @@ export async function sendMessage(input: {
   // 3. Send to Supabase
   try {
     const supabase = ensureSupabase();
+    const bodyToInsert = input.kind === "voice"
+      ? ""
+      : imagePath
+      ? (input.body && input.body.trim() ? input.body : "")
+      : input.body;
+
     const insert = {
       chat_id: input.chatId,
       sender_id: input.senderId,
       kind: pendingMsg.kind,
-      body: input.body, // store plain text / empty in body; image lives in image_path
+      body: bodyToInsert,
       image_path: imagePath,
       duration: input.duration,
       reply_to: input.replyTo,
@@ -183,11 +195,18 @@ export async function syncPendingMessages() {
 
   for (const pendingMsg of outbox) {
     try {
+      const bodyToInsert = pendingMsg.kind === "voice"
+        ? ""
+        : pendingMsg.imagePath
+        ? (pendingMsg.caption?.trim() || "")
+        : pendingMsg.body;
+
       const insert = {
         chat_id: pendingMsg.chatId,
         sender_id: pendingMsg.senderId,
         kind: pendingMsg.kind,
-        body: pendingMsg.body,
+        body: bodyToInsert,
+        image_path: pendingMsg.imagePath,
         duration: pendingMsg.duration,
         reply_to: pendingMsg.replyTo,
         forwarded_from: pendingMsg.forwardedFrom,

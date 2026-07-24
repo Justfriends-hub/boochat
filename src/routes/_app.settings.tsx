@@ -10,6 +10,8 @@ import { InstallButton } from "@/components/InstallButton";
 import { useAuth } from "@/hooks/useAuth";
 import { signOut, updateProfile } from "@/api/authApi";
 import { LogOut, ShieldCheck, Camera, Loader2, Pencil, X, Check } from "lucide-react";
+import { normalizeRole } from "@/lib/mockStore";
+import { getErrorMessage } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/settings")({
@@ -52,8 +54,8 @@ function SettingsPage() {
       try {
         await updateProfile(me.id, { avatarFile: file });
         toast.success("Avatar updated!");
-      } catch (err: any) {
-        toast.error(err.message || "Failed to update avatar");
+      } catch (err: unknown) {
+        toast.error(getErrorMessage(err, "Failed to update avatar"));
         setAvatarPreview(null); // revert preview on failure
       } finally {
         setAvatarUploading(false);
@@ -79,8 +81,8 @@ function SettingsPage() {
       await updateProfile(me.id, { displayName, bio });
       toast.success("Profile updated!");
       setEditingProfile(false);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save profile");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to save profile"));
     } finally {
       setSavingProfile(false);
     }
@@ -234,7 +236,7 @@ function SettingsPage() {
         </Card>
 
         {/* ── Admin panel (admin only) ── */}
-        {(me.role === "admin" || me.role === "superadmin") && (
+        {(normalizeRole(me.role) === "owner") && (
           <Card className="p-4">
             <Button
               variant="outline"
