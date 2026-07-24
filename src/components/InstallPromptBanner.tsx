@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Download, Share, X, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 
 export function InstallPromptBanner() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);

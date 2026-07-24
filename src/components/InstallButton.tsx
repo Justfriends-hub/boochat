@@ -1,29 +1,16 @@
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Download, Share } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { usePWAInstall } from "@/hooks/usePWAInstall";
 
 export function InstallButton() {
-  const [prompt, setPrompt] = useState<any>(null);
-  const [installed, setInstalled] = useState(false);
-  const isiOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const { isInstalled, isIOS, triggerInstall } = usePWAInstall();
 
-  useEffect(() => {
-    const onPrompt = (e: any) => { e.preventDefault(); setPrompt(e); };
-    const onInstalled = () => setInstalled(true);
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
-  }, []);
-
-  if (installed) {
+  if (isInstalled) {
     return <p className="text-sm text-muted-foreground">App is installed 🎉</p>;
   }
 
-  if (isiOS) {
+  if (isIOS) {
     return (
       <div className="rounded-lg border p-3 text-sm">
         <p className="flex items-center gap-2 font-medium">
@@ -39,14 +26,12 @@ export function InstallButton() {
   return (
     <Button
       onClick={async () => {
-        if (!prompt) {
-          toast.info("Install prompt not available yet. Try again from the browser menu.");
-          return;
+        const accepted = await triggerInstall();
+        if (accepted) {
+          toast.success("Installing Boochat as an app…");
+        } else {
+          toast.info("The install prompt is not available right now. Try again from the browser menu.");
         }
-        prompt.prompt();
-        const { outcome } = await prompt.userChoice;
-        if (outcome === "accepted") toast.success("Installing…");
-        setPrompt(null);
       }}
     >
       <Download className="mr-2 h-4 w-4" /> Install App
