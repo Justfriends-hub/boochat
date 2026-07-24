@@ -5,6 +5,9 @@ type UIState = {
   setDraft: (chatId: string, text: string) => void;
   clearDraft: (chatId: string) => void;
   sessionId: string;
+  viewedStatusIds: Set<string>;
+  addViewedStatus: (statusId: string) => void;
+  hasViewedStatus: (statusId: string) => boolean;
 };
 
 function sessionId() {
@@ -17,11 +20,38 @@ function sessionId() {
   return id;
 }
 
-export const useUIStore = create<UIState>((set) => ({
+function loadViewedStatuses(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const cached = sessionStorage.getItem("chatapp.viewedStatuses");
+    return cached ? new Set(JSON.parse(cached)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveViewedStatuses(ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem("chatapp.viewedStatuses", JSON.stringify(Array.from(ids)));
+  } catch {}
+}
+
+export const useUIStore = create<UIState>((set, get) => ({
   drafts: {},
   setDraft: (chatId, text) => set((s) => ({ drafts: { ...s.drafts, [chatId]: text } })),
   clearDraft: (chatId) => set((s) => {
     const d = { ...s.drafts }; delete d[chatId]; return { drafts: d };
   }),
   sessionId: sessionId(),
+  viewedStatusIds: loadViewedStatuses(),
+  addViewedStatus: (statusId: string) => {
+    const current = get().viewedStatusIds;
+    if (!current.has(statusId)) {
+      current.add(statusId);
+      saveViewedStatuses(current);
+      set({ viewedStatusIds: new Set(current) });
+    }
+  },
+  hasViewedStatus: (statusId: string) => get().viewedStatusIds.has(statusId),
 }));

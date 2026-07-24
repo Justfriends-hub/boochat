@@ -1,8 +1,47 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import { getState, setState, uid, type Status } from "@/lib/mockStore";
+import { useUIStore } from "@/stores/uiStore";
 
 const STATUS_BUCKET = "status-media";
+
+// Signed URL cache: stores { [path]: { url: string, expiresAt: number } }
+function getSignedUrlCache(): Record<string, { url: string; expiresAt: number }> {
+  if (typeof window === "undefined") return {};
+  try {
+    const cached = sessionStorage.getItem("chatapp.signedUrls");
+    return cached ? JSON.parse(cached) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSignedUrlCache(cache: Record<string, { url: string; expiresAt: number }>) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem("chatapp.signedUrls", JSON.stringify(cache));
+  } catch {}
+}
+
+function getCachedSignedUrl(path: string): string | null {
+  const cache = getSignedUrlCache();
+  const entry = cache[path];
+  if (entry && entry.expiresAt > Date.now()) {
+    return entry.url;
+  }
+  // Clean up expired entry
+  if (entry) {
+    delete cache[path];
+    saveSignedUrlCache(cache);
+  }
+  return null;
+}
+
+function setCachedSignedUrl(path: string, url: string, expiresAt: number) {
+  const cache = getSignedUrlCache();
+  cache[path] = { url, expiresAt };
+  saveSignedUrlCache(cache);
+}
 
 export function isExpired(s: Status) {
   return Date.now() - s.createdAt > 24 * 60 * 60 * 1000;
@@ -29,6 +68,11 @@ function mapStatus(row: any): Status {
 
 async function getMediaUrl(mediaUrl: string) {
   if (!mediaUrl) return mediaUrl;
+  
+  // Check session cache first
+  const cached = getCachedSignedUrl(mediaUrl);
+  if (cached) return cached;
+  
   try {
     const supabase = ensureSupabase();
     const { data, error } = await supabase.storage
@@ -37,10 +81,19 @@ async function getMediaUrl(mediaUrl: string) {
     if (error || !data?.signedUrl) {
       return mediaUrl;
     }
+    // Cache for 59 minutes (signed URL is valid for 60)
+    setCachedSignedUrl(mediaUrl, data.signedUrl, Date.now() + 59 * 60 * 1000);
     return data.signedUrl;
   } catch {
     return mediaUrl;
   }
+}
+
+// Batch sign multiple media URLs in parallel instead of sequential
+async function batchGetMediaUrls(mediaUrls: string[]): Promise<string[]> {
+  if (!mediaUrls.length) return [];
+  const results = await Promise.allSettled(mediaUrls.map((url) => getMediaUrl(url)));
+  return results.map((result, idx) => (result.status === "fulfilled" ? result.value : mediaUrls[idx]));
 }
 
 async function deleteStatusMedia(status?: Pick<Status, "media" | "storagePath">) {
@@ -76,20 +129,33 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
 
     if (!error && data) {
       const statuses = (data ?? []).map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
-      const signedStatuses = await Promise.all(
-        statuses.map(async (status) => ({
-          ...status,
-          media: await getMediaUrl(status.media),
-        })),
-      );
+      
+      // Batch sign all media URLs in parallel instead of sequential
+      const mediaUrls = statuses.map((s) => s.media);
+      const signedUrls = await batchGetMediaUrls(mediaUrls);
+      const signedStatuses = statuses.map((status, idx) => ({
+        ...status,
+        media: signedUrls[idx],
+      }));
 
       setState((s) => {
         const existingIds = new Set(signedStatuses.map((st) => st.id));
         const localOnly = s.statuses.filter((st) => !existingIds.has(st.id) && !isExpired(st));
         const merged = [...signedStatuses, ...localOnly];
-        const byId = new Map(merged.map((st) => [st.id, st]));
+        
+        // Proper deduplication: keep latest by ID
+        const byId = new Map<string, Status>();
+        merged.forEach((st) => {
+          const existing = byId.get(st.id);
+          // Keep the version with more updated viewedBy/reactions info
+          if (!existing || existing.viewedBy.length < st.viewedBy.length) {
+            byId.set(st.id, st);
+          }
+        });
+        
         s.statuses = Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
       });
+      
       // apply privacy filtering for viewerId when provided
       const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
       if (!viewerId) return all;
@@ -194,6 +260,12 @@ export async function createStatus(input: {
 
 export async function markStatusViewed(id: string, userId: string) {
   if (!id || !userId) return;
+
+  // Add to session cache
+  try {
+    const store = useUIStore.getState();
+    store.addViewedStatus(id);
+  } catch {}
 
   // Always update local store immediately
   setState((s) => {

@@ -111,6 +111,23 @@ export function StoryViewer({
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [index, paused, mediaReady, current, statuses.length, onClose, storyDuration]);
 
+  useEffect(() => {
+    if (current?.kind !== "video") return;
+    if (!mediaReady) return;
+    if (paused) {
+      videoRef.current?.pause();
+      return;
+    }
+    const video = videoRef.current;
+    if (!video) return;
+    const playPromise = video.play();
+    if (playPromise?.catch) {
+      playPromise.catch(() => {
+        // autoplay may be blocked in some browsers; if so, keep the video ready and allow user interaction
+      });
+    }
+  }, [current?.kind, mediaReady, paused, current?.id]);
+
   // Focus mgmt + keyboard controls
   useEffect(() => {
     restoreFocusRef.current = document.activeElement as HTMLElement;
@@ -325,6 +342,13 @@ export function StoryViewer({
                 autoPlay
                 muted
                 playsInline
+                onLoadedMetadata={(event) => {
+                  const video = event.currentTarget;
+                  const durationMs = isFinite(video.duration)
+                    ? Math.max(1000, Math.min(60000, video.duration * 1000))
+                    : DEFAULT_DURATION_MS;
+                  setStoryDuration(durationMs);
+                }}
                 onLoadedData={(event) => {
                   setMediaReady(true);
                   const video = event.currentTarget;
