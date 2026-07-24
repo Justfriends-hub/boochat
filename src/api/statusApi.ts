@@ -40,13 +40,15 @@ async function getMediaUrl(mediaUrl: string) {
   }
 }
 
+const STATUS_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
 export async function listActiveStatuses(): Promise<Status[]> {
   try {
     const supabase = ensureSupabase();
     const { data, error } = await supabase
       .from("statuses")
       .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
-      .gt("expires_at", "now()");
+      .or("expires_at.gt.now(),expires_at.is.null");
 
     if (!error && data) {
       const statuses = (data ?? []).map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
@@ -97,6 +99,7 @@ export async function createStatus(input: {
       .upload(path, blob);
 
     if (!uploadError) {
+      const expiresAt = new Date(Date.now() + STATUS_EXPIRY_MS).toISOString();
       const { data, error } = await supabase
         .from("statuses")
         .insert([
@@ -105,6 +108,7 @@ export async function createStatus(input: {
             kind: input.kind,
             media_url: path,
             caption: input.caption,
+            expires_at: expiresAt,
           },
         ])
         .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
