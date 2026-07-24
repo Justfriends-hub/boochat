@@ -173,41 +173,73 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
       return [];
     }
 
-    const { data, error } = await query;
+    // Use local cache to avoid refetching statuses we've already loaded/viewed.
+    const local = getState().statuses.filter((s) => !isExpired(s));
+    const localIds = new Set(local.map((s) => s.id));
+    const maxLocalCreatedAt = local.reduce((max, s) => Math.max(max, s.createdAt || 0), 0);
 
-    if (!error && data) {
-      const statuses = (data ?? []).map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
-      
-      // Batch sign all media URLs in parallel instead of sequential
+    // We'll perform up to two lightweight fetches: (A) fetch any missing IDs that
+    // visibility RPC told us about, and (B) fetch any statuses created after our
+    // local cache's max `createdAt` so we only load new items.
+    const rows: any[] = [];
+
+    // A) missing by ID
+    if (visibleStatusIds && visibleStatusIds.length) {
+      const missing = visibleStatusIds.filter((id) => !localIds.has(id));
+      if (missing.length) {
+        const { data: missingRows, error: missErr } = await supabase
+          .from("statuses")
+          .select("*, status_views(viewer_id), status_reactions(user_id,emoji)")
+          .in("id", missing);
+        if (!missErr && missingRows) rows.push(...missingRows);
+      }
+    }
+
+    // B) fetch new statuses created after our local cache
+    const maxLocalIso = new Date(maxLocalCreatedAt || 0).toISOString();
+    if (!maxLocalCreatedAt) {
+      // no local cache — fall back to full query
+      const { data, error } = await query;
+      if (!error && data) rows.push(...data);
+    } else {
+      const { data: newRows, error: newErr } = await query.gt("created_at", maxLocalIso);
+      if (!newErr && newRows) rows.push(...newRows);
+    }
+
+    if (rows.length) {
+      const statuses = rows.map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
       const mediaUrls = statuses.map((s) => s.media);
       const signedUrls = await batchGetMediaUrls(mediaUrls);
-      const signedStatuses = statuses.map((status, idx) => ({
-        ...status,
-        media: signedUrls[idx],
-      }));
+      const signedStatuses = statuses.map((status, idx) => ({ ...status, media: signedUrls[idx] }));
 
       setState((s) => {
-        const existingIds = new Set(signedStatuses.map((st) => st.id));
-        const localOnly = s.statuses.filter((st) => !existingIds.has(st.id) && !isExpired(st));
-        const merged = [...signedStatuses, ...localOnly];
-        
-        // Proper deduplication: keep latest by ID
+        // Merge: keep existing local entries (preserve viewedBy if already present),
+        // but replace or add incoming statuses.
         const byId = new Map<string, Status>();
-        merged.forEach((st) => {
+        // seed with current local (non-expired)
+        s.statuses.filter((st) => !isExpired(st)).forEach((st) => byId.set(st.id, st));
+        // overlay new/synced statuses
+        signedStatuses.forEach((st) => {
           const existing = byId.get(st.id);
-          // Keep the version with more updated viewedBy/reactions info
-          if (!existing || existing.viewedBy.length < st.viewedBy.length) {
-            byId.set(st.id, st);
+          if (!existing) byId.set(st.id, st);
+          else {
+            // merge viewedBy and reactions conservatively
+            const viewed = Array.from(new Set([...(existing.viewedBy || []), ...(st.viewedBy || [])]));
+            const reactionsMap = new Map<string, { userId: string; emoji: string }>();
+            (existing.reactions || []).forEach((r) => reactionsMap.set(r.userId, r));
+            (st.reactions || []).forEach((r) => reactionsMap.set(r.userId, r));
+            byId.set(st.id, { ...existing, ...st, viewedBy: viewed, reactions: Array.from(reactionsMap.values()) });
           }
         });
-        
-        s.statuses = Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
+
+        // convert back to array sorted by newest
+        s.statuses = Array.from(byId.values()).filter((st) => !isExpired(st)).sort((a, b) => b.createdAt - a.createdAt);
       });
-      
-      const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
-      if (!viewerId) return all;
-      return all.filter((st) => isVisibleTo(st, viewerId));
     }
+
+    const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
+    if (!viewerId) return all;
+    return all.filter((st) => isVisibleTo(st, viewerId));
   } catch (err) {
     console.warn("Unable to fetch active statuses online, returning cached statuses:", err);
   }
@@ -296,7 +328,19 @@ export async function createStatus(input: {
           media,
           storagePath: path,
         };
-        setState((s) => { s.statuses.unshift(mapped); });
+        setState((s) => {
+          // Remove any existing statuses from this same user to keep a single
+          // active status per user (prevents duplicate rows in the UI).
+          s.statuses = s.statuses.filter((st) => st.userId !== mapped.userId);
+          s.statuses.unshift(mapped);
+        });
+        // Attempt best-effort cleanup on server: remove other statuses for same user
+        (async () => {
+          try {
+            const sup = ensureSupabase();
+            await sup.from("statuses").delete().eq("user_id", input.userId).neq("id", data.id);
+          } catch {}
+        })();
         publish("status:changed");
         return mapped;
       }
@@ -306,7 +350,11 @@ export async function createStatus(input: {
   }
 
   // Fallback to local store
-  setState((s) => { s.statuses.unshift(newStatus); });
+  setState((s) => {
+    // Remove other statuses from this user and add the new one at top
+    s.statuses = s.statuses.filter((st) => st.userId !== newStatus.userId);
+    s.statuses.unshift(newStatus);
+  });
   publish("status:changed");
   return newStatus;
 }
