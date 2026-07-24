@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Heart, Send, Pause, Play, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Heart, Send, Pause, Play, ChevronLeft, ChevronRight, MoreHorizontal, Eye, Download, Share2, Trash2 } from "lucide-react";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { markStatusViewed, reactToStatus } from "@/api/statusApi";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { markStatusViewed, reactToStatus, deleteStatus } from "@/api/statusApi";
 import { getOrCreateDM } from "@/api/chatsApi";
 import { sendMessage } from "@/api/messagesApi";
 import { useNavigate } from "@tanstack/react-router";
@@ -135,22 +136,68 @@ export function StoryViewer({
   const goPrev = () => setIndex((i) => Math.max(0, i - 1));
   const goNext = () => setIndex((i) => (i + 1 < statuses.length ? i + 1 : (onClose(), i)));
 
+  const viewCount = current.viewedBy.length;
+  const likeCount = current.reactions.length;
+  const isOwner = current.userId === viewerId;
+
   const doReact = (emoji: string) => {
     reactToStatus(current.id, viewerId, emoji);
     toast.success(`Reacted ${emoji}`);
   };
 
-  const doReply = async () => {
-    if (!reply.trim() || !user) return;
-    const chat = await getOrCreateDM(viewerId, user.id);
-    await sendMessage({
-      chatId: chat.id, senderId: viewerId, kind: "text",
-      body: `Re: your status — ${reply}`,
-    });
-    setReply("");
-    onClose();
-    navigate({ to: "/chats/$chatId", params: { chatId: chat.id } });
+  const deleteCurrentStatus = async () => {
+    try {
+      await deleteStatus(current.id);
+      toast.success("Status deleted");
+      onClose();
+    } catch (err) {
+      toast.error("Unable to delete status");
+    }
   };
+
+  const shareCurrentStatus = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Status from ${user?.displayName ?? "someone"}`,
+          text: current.caption ?? "",
+          url: current.media,
+        });
+        return;
+      } catch (err) {
+        // ignore share cancel
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(current.media);
+      toast.success("Status link copied");
+    } catch {
+      toast.error("Unable to copy link");
+    }
+  };
+
+  const saveCurrentStatus = async () => {
+    try {
+      const res = await fetch(current.media);
+      const blob = await res.blob();
+      const extension = blob.type.split("/")[1] || "jpg";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `status-${current.id}.${extension}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Status saved");
+    } catch {
+      toast.error("Unable to save status");
+    }
+  };
+
+  const goPrev = () => setIndex((i) => Math.max(0, i - 1));
+  const goNext = () => setIndex((i) => (i + 1 < statuses.length ? i + 1 : (onClose(), i)));
 
   return (
     <div
@@ -183,14 +230,50 @@ export function StoryViewer({
         <UserAvatar name={user?.displayName || ""} src={user?.avatar} size={36} />
         <div className="flex-1">
           <p className="text-sm font-semibold">{user?.displayName}</p>
+          {isOwner && (
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-white/75">
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1">
+                <Eye className="h-3.5 w-3.5" />
+                {viewCount}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1">
+                <Heart className="h-3.5 w-3.5" />
+                {likeCount}
+              </span>
+            </div>
+          )}
         </div>
-        <button
-          onClick={() => setPaused((p) => !p)}
-          className="rounded-full p-2 hover:bg-white/10"
-          aria-label={paused ? "Resume story" : "Pause story"}
-        >
-          {paused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
-        </button>
+        {isOwner ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" className="rounded-full p-2 text-white hover:bg-white/10">
+                <MoreHorizontal className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent sideOffset={8} align="end" className="bg-slate-950 border border-white/10">
+              <DropdownMenuItem onSelect={deleteCurrentStatus} className="text-white">
+                <Trash2 className="h-4 w-4" />
+                Delete status
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={shareCurrentStatus} className="text-white">
+                <Share2 className="h-4 w-4" />
+                Share status
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={saveCurrentStatus} className="text-white">
+                <Download className="h-4 w-4" />
+                Save status
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button
+            onClick={() => setPaused((p) => !p)}
+            className="rounded-full p-2 hover:bg-white/10"
+            aria-label={paused ? "Resume story" : "Pause story"}
+          >
+            {paused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+          </button>
+        )}
         <button
           ref={closeBtnRef}
           onClick={onClose}
