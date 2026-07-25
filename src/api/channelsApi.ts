@@ -7,7 +7,7 @@ function isFullUrl(value?: string): boolean {
   return !!value && /^(https?:\/\/|data:|blob:)/i.test(value);
 }
 
-function mapChannel(row: any, members: string[]): Channel {
+function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
   const visibility = row.visibility ?? (row.is_public === false ? "private" : "public");
   return {
     id: row.id,
@@ -15,12 +15,32 @@ function mapChannel(row: any, members: string[]): Channel {
     description: row.description,
     avatar: row.avatar_url ?? `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.name)}`,
     ownerId: row.owner_id,
-    adminIds: [], // TODO: add admin management table if needed
+    adminIds,
     memberIds: members,
     onlyAdminsPost: true, // Default behavior
     createdAt: new Date(row.created_at).getTime(),
     visibility,
   };
+}
+
+async function fetchChannelAdmins(channelIds: string[]) {
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("channel_members")
+      .select("channel_id,user_id,is_admin")
+      .in("channel_id", channelIds)
+      .eq("is_admin", true);
+
+    if (error) {
+      console.warn("Unable to fetch channel admin flags:", error);
+      return [];
+    }
+    return data ?? [];
+  } catch (error) {
+    console.warn("Unable to fetch channel admins:", error);
+    return [];
+  }
 }
 
 async function resolveChannelAvatars(channels: Channel[]): Promise<Channel[]> {
@@ -62,15 +82,18 @@ export async function listChannels(): Promise<Channel[]> {
     if (!channelError && channels) {
       const channelIds = channels.map((c) => c.id);
       const memberRows = await fetchChannelMembers(channelIds);
+      const adminRows = await fetchChannelAdmins(channelIds);
       
       let remoteChannels = channels.map((ch) => {
         const members = memberRows
           .filter((row) => row.channel_id === ch.id)
           .map((row) => row.user_id);
-        // Always include owner as member
+        const adminIds = adminRows
+          .filter((row) => row.channel_id === ch.id)
+          .map((row) => row.user_id);
         const allMembers = [ch.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
         const cached = getState().channels.find((c) => c.id === ch.id);
-        const remoteChannel = mapChannel(ch, allMembers);
+        const remoteChannel = mapChannel(ch, allMembers, adminIds);
         if (cached?.visibility) remoteChannel.visibility = cached.visibility;
         return remoteChannel;
       });
@@ -99,16 +122,21 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
         .from("channel_members")
         .select("user_id")
         .eq("channel_id", id);
+      const { data: adminRows } = await supabase
+        .from("channel_members")
+        .select("user_id")
+        .eq("channel_id", id)
+        .eq("is_admin", true);
       
       const members = (memberRows ?? []).map((row) => row.user_id);
+      const adminIds = (adminRows ?? []).map((row) => row.user_id);
       const allMembers = [channelRow.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
       const cached = getState().channels.find((c) => c.id === id);
-      let remoteChannel = mapChannel(channelRow, allMembers);
+      let remoteChannel = mapChannel(channelRow, allMembers, adminIds);
       if (cached?.visibility) remoteChannel.visibility = cached.visibility;
       if (!isFullUrl(remoteChannel.avatar)) {
         remoteChannel.avatar = await getImageUrl("channel-media", remoteChannel.avatar);
       }
-      
       setState((s) => {
         const idx = s.channels.findIndex((c) => c.id === id);
         if (idx >= 0) s.channels[idx] = remoteChannel;
@@ -153,7 +181,7 @@ export async function createChannel(input: { name: string; description: string; 
     console.warn("Failed to add owner as member:", memberError);
   }
 
-  let ch = mapChannel({ ...channelRow, visibility }, [input.ownerId]);
+  let ch = mapChannel({ ...channelRow, visibility }, [input.ownerId], [input.ownerId]);
   if (!isFullUrl(ch.avatar)) {
     ch.avatar = await getImageUrl("channel-media", ch.avatar);
   }
@@ -222,7 +250,17 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
 }
 
 export async function addChannelAdmin(channelId: string, userId: string) {
-  // This would need admin tracking table - for now, just update cache
+  const supabase = ensureSupabase();
+  try {
+    const { data, error } = await supabase.from("channel_members").upsert(
+      { channel_id: channelId, user_id: userId, is_admin: true },
+      { onConflict: ["channel_id", "user_id"] }
+    );
+    if (error) throw error;
+  } catch (err) {
+    console.warn("addChannelAdmin: supabase update failed, applying locally:", err);
+  }
+
   setState((s) => {
     const ch = s.channels.find((c) => c.id === channelId);
     if (ch && !ch.adminIds.includes(userId)) {
@@ -233,7 +271,18 @@ export async function addChannelAdmin(channelId: string, userId: string) {
 }
 
 export async function removeChannelAdmin(channelId: string, userId: string) {
-  // This would need admin tracking table - for now, just update cache
+  const supabase = ensureSupabase();
+  try {
+    const { data, error } = await supabase
+      .from("channel_members")
+      .update({ is_admin: false })
+      .eq("channel_id", channelId)
+      .eq("user_id", userId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("removeChannelAdmin: supabase update failed, applying locally:", err);
+  }
+
   setState((s) => {
     const ch = s.channels.find((c) => c.id === channelId);
     if (ch) {

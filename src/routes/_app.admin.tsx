@@ -13,6 +13,9 @@ import {
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from "@/components/ui/tabs";
+import { BoostControlPanel } from "@/components/admin/BoostControlPanel";
+import { ChannelOverview } from "@/components/admin/ChannelOverview";
+import { CommentApprovalQueue } from "@/components/admin/CommentApprovalQueue";
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from "@/components/ui/table";
@@ -196,6 +199,9 @@ function AdminPage() {
               <TabsTrigger value="users" className="gap-1.5"><Users className="h-3.5 w-3.5" />Users</TabsTrigger>
               <TabsTrigger value="groups" className="gap-1.5"><MessageCircle className="h-3.5 w-3.5" />Groups</TabsTrigger>
               <TabsTrigger value="channels" className="gap-1.5"><Radio className="h-3.5 w-3.5" />Channels</TabsTrigger>
+              <TabsTrigger value="boosts" className="gap-1.5"><TrendingUp className="h-3.5 w-3.5" />Boosts</TabsTrigger>
+              <TabsTrigger value="analytics" className="gap-1.5"><TrendingUp className="h-3.5 w-3.5" />Analytics</TabsTrigger>
+              <TabsTrigger value="queue" className="gap-1.5"><MessageCircle className="h-3.5 w-3.5" />Queue</TabsTrigger>
               <TabsTrigger value="system" className="gap-1.5"><ShieldAlert className="h-3.5 w-3.5" />System</TabsTrigger>
             </TabsList>
 
@@ -271,6 +277,27 @@ function AdminPage() {
                   ))}
                 </TableBody>
               </Table>
+            </TabsContent>
+
+            {/* ─── BOOSTS TAB ─────────────────────────────────────────── */}
+            <TabsContent value="boosts">
+              <div className="p-2">
+                <BoostControlPanel />
+              </div>
+            </TabsContent>
+
+            {/* ─── ANALYTICS TAB ─────────────────────────────────────── */}
+            <TabsContent value="analytics">
+              <div className="p-2">
+                <ChannelOverview isSuperAdmin={normalizeRole(me?.role || '') === 'owner'} />
+              </div>
+            </TabsContent>
+
+            {/* ─── QUEUE TAB ─────────────────────────────────────────── */}
+            <TabsContent value="queue">
+              <div className="p-2">
+                <CommentApprovalQueue />
+              </div>
             </TabsContent>
 
             {/* ─── GROUPS TAB ─────────────────────────────────────────── */}

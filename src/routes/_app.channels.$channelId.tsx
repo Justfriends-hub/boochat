@@ -9,7 +9,7 @@ import { Composer } from "@/components/Composer";
 import {
   getChannel, listPosts, createPost, togglePostLike, markPostViewed, likeCount, viewCount,
   subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe, updateChannel,
-  requestJoinChannel, approveJoinChannelRequest, rejectJoinChannelRequest, uploadChannelAvatar,
+  addChannelAdmin, removeChannelAdmin, requestJoinChannel, approveJoinChannelRequest, rejectJoinChannelRequest, uploadChannelAvatar,
 } from "@/api/channelsApi";
 import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
@@ -67,17 +67,18 @@ function ChannelPage() {
     setShareLink(channel?.visibility === "private" ? "" : `${baseUrl}/join/${channelId}`);
   }, [channelId, channel?.visibility]);
 
-  const isSuperAdmin = normalizeRole(me.role) === "owner" || normalizeRole(me.role) === "member";
+  const isSiteOwner = normalizeRole(me.role) === "owner";
   const isOwner = channel?.ownerId === me.id;
   const isAdmin = channel?.adminIds?.includes(me.id);
-  const canPost = isSuperAdmin || isOwner || isAdmin;
-  const canManageVisibility = isSuperAdmin || isOwner;
+  const canPost = isSiteOwner || isOwner || isAdmin;
+  const canManageVisibility = isSiteOwner || isOwner;
   const isSubscribed = channel?.memberIds.includes(me.id);
   const isPrivateChannel = channel?.visibility === "private";
   const isApprovedMember = !!channel && channel.memberIds.includes(me.id);
   const isPendingJoinRequest = !!channel && (channel.joinRequests ?? []).some((req) => req.userId === me.id && req.status === "pending");
   const pendingJoinRequests = (channel?.joinRequests ?? []).filter((req) => req.status === "pending");
-  const canViewChannel = !isPrivateChannel || isApprovedMember || canManageVisibility;
+  const canViewChannel = !isPrivateChannel || isApprovedMember || canManageVisibility || isAdmin;
+  const canViewBoostInfo = isSiteOwner || isOwner || isAdmin;
 
   const handleSubscribe = async () => {
     if (!channel) return;
@@ -116,6 +117,22 @@ function ChannelPage() {
       toast.success("Request rejected.");
     } catch (err: any) {
       toast.error(err.message || "Failed to reject request");
+    }
+  };
+
+  const toggleChannelAdminStatus = async (userId: string, grant: boolean) => {
+    if (!channel || !canManageVisibility) return;
+    try {
+      if (grant) {
+        await addChannelAdmin(channel.id, userId);
+        toast.success("Channel admin granted.");
+      } else {
+        await removeChannelAdmin(channel.id, userId);
+        toast.success("Channel admin revoked.");
+      }
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update channel admin role");
     }
   };
 
@@ -411,6 +428,74 @@ function ChannelPage() {
                     </div>
                   </div>
                 </div>
+
+                {canViewBoostInfo && (
+                  <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-muted-foreground">Boost Insights</p>
+                        <p className="text-sm text-muted-foreground">Metrics only visible to the owner and delegated channel admins.</p>
+                      </div>
+                      <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">Admin View</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-xl bg-background p-3">
+                        <p className="text-xs uppercase text-muted-foreground mb-1">Total likes</p>
+                        <p className="text-lg font-semibold">{posts.reduce((sum, p) => sum + p.likes.length + (p.boostedLikes ?? 0), 0)}</p>
+                      </div>
+                      <div className="rounded-xl bg-background p-3">
+                        <p className="text-xs uppercase text-muted-foreground mb-1">Total views</p>
+                        <p className="text-lg font-semibold">{posts.reduce((sum, p) => sum + p.views.length + (p.boostedViews ?? 0), 0)}</p>
+                      </div>
+                      <div className="rounded-xl bg-background p-3">
+                        <p className="text-xs uppercase text-muted-foreground mb-1">Boosted likes</p>
+                        <p className="text-lg font-semibold">{posts.reduce((sum, p) => sum + (p.boostedLikes ?? 0), 0)}</p>
+                      </div>
+                      <div className="rounded-xl bg-background p-3">
+                        <p className="text-xs uppercase text-muted-foreground mb-1">Boosted views</p>
+                        <p className="text-lg font-semibold">{posts.reduce((sum, p) => sum + (p.boostedViews ?? 0), 0)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(isOwner || isSiteOwner) && (
+                  <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-muted-foreground">Channel Admins</p>
+                        <p className="text-sm text-muted-foreground">Grant or revoke channel admin rights for members.</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {channel.memberIds.map((memberId) => {
+                        const user = users.find((u) => u.id === memberId);
+                        if (!user) return null;
+                        const isMemberAdmin = channel.adminIds.includes(user.id);
+                        const isOwnerLabel = user.id === channel.ownerId;
+                        return (
+                          <div key={user.id} className="flex items-center justify-between gap-3 rounded-xl bg-background p-3">
+                            <div>
+                              <p className="font-medium text-sm">{user.displayName || user.email}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {isOwnerLabel ? 'Owner' : isMemberAdmin ? 'Channel Admin' : 'Member'}
+                              </p>
+                            </div>
+                            {!isOwnerLabel && (
+                              <Button
+                                size="sm"
+                                variant={isMemberAdmin ? 'outline' : 'default'}
+                                onClick={() => toggleChannelAdminStatus(user.id, !isMemberAdmin)}
+                              >
+                                {isMemberAdmin ? 'Revoke admin' : 'Grant admin'}
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Visibility Section */}
                 <div className="space-y-3 rounded-lg border bg-muted/40 p-3">
