@@ -64,7 +64,7 @@ export function BoostControlPanel() {
           .eq('channel_id', selectedChannel)
           .order('created_at', { ascending: false })
           .limit(50);
-        setPosts((data as any) || []);
+        setPosts((data as any)?.map((p: any) => ({ id: p.id, content: p.body })) || []);
       } catch (err) {
         console.error('[BoostControlPanel] fetchPosts', err);
         setPosts([]);
@@ -337,6 +337,31 @@ export function BoostControlPanel() {
                 <span>~{Math.round(parseInt(targetCount || '0', 10) / Math.max(1, durationHours[0]))} subs/hour</span>
                 <span>30 days</span>
               </div>
+            </div>
+          )}
+
+          {boostKind !== 'subscribers' && (
+            <div className="space-y-1.5 animate-fade-in">
+              <Label className="text-xs text-muted-foreground">Select Post to Boost</Label>
+              {posts.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-3 text-center">No posts available in this channel.</p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto border border-border rounded-lg bg-secondary">
+                  {posts.map((post) => (
+                    <button
+                      key={post.id}
+                      onClick={() => setSelectedMessage(post.id)}
+                      className={`w-full text-left p-2 border-b text-xs transition-all ${
+                        selectedMessage === post.id
+                          ? 'bg-primary/10 border-primary text-foreground'
+                          : 'bg-secondary text-muted-foreground hover:bg-secondary/80'
+                      }`}
+                    >
+                      <p className="truncate font-medium">{post.content ? post.content.substring(0, 50) : '(No content)'}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

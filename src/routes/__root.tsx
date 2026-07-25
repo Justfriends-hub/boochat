@@ -86,6 +86,12 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        <style>{`
+          html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+          * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+          input, textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: none; }
+          [contenteditable] { -webkit-user-select: text; user-select: text; }
+        `}</style>
       </head>
       <body>
         {children}

@@ -33,26 +33,26 @@ export function ChannelOverview({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 
   const fetchChannels = async () => {
     setLoading(true);
-    const { data: chats, error: chatsError } = await supabase
+    const { data: channels, error: channelsError } = await supabase
       .from('channels')
       .select('id, name');
 
-    if (chatsError || !chats) {
-      console.error('[ChannelOverview] Failed to load channels', chatsError);
+    if (channelsError || !channels) {
+      console.error('[ChannelOverview] Failed to load channels', channelsError);
       setChannels([]);
       setLoading(false);
       return;
     }
 
     const channelData = await Promise.all(
-      (chats as any).map(async (chat: any) => {
+      (channels as any).map(async (channel: any) => {
         const { count: realMembers } = await supabase
           .from('channel_members')
           .select('*', { count: 'exact', head: true })
-          .eq('channel_id', chat.id);
+          .eq('channel_id', channel.id);
 
         let boostCount = 0;
-        const { data: boostData, error: boostError } = await supabase.rpc('get_visible_boost', { _chat_id: chat.id, _kind: 'any' }).catch((e) => ({ data: 0, error: e }));
+        const { data: boostData, error: boostError } = await supabase.rpc('get_visible_boost', { _chat_id: channel.id, _kind: 'any' }).catch((e) => ({ data: 0, error: e }));
         if (!boostError && boostData) {
           boostCount = (boostData as number) || 0;
         } else {
@@ -60,11 +60,11 @@ export function ChannelOverview({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           const { data: settingRows, error: settingsError } = await supabase
             .from('channel_settings')
             .select('boost_target')
-            .eq('chat_id', chat.id);
+            .eq('chat_id', channel.id);
           const { data: postBoostRows, error: postBoostError } = await supabase
             .from('post_boosts')
             .select('boost_target')
-            .eq('chat_id', chat.id);
+            .eq('chat_id', channel.id);
           if (!settingsError && settingRows) {
             boostCount += (settingRows as any[])
               .map((row) => Number(row.boost_target) || 0)
@@ -78,8 +78,8 @@ export function ChannelOverview({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         }
 
         return {
-          id: chat.id,
-          name: chat.name || 'Unnamed Channel',
+          id: channel.id,
+          name: channel.name || 'Unnamed Channel',
           real_members: realMembers || 0,
           boosted_count: boostCount,
           visible_total: (realMembers || 0) + boostCount,
