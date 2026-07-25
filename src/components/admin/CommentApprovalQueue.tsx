@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Check, X, Clock, MessageSquare, Eye, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ensureSupabase } from '@/lib/supabaseClient';
+import { listUsers } from '@/api/usersApi';
 import { toast } from 'sonner';
 
 interface PendingComment {
@@ -33,6 +35,7 @@ export function CommentApprovalQueue() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [compactView, setCompactView] = useState(false);
+  const { data: users = [] } = useQuery({ queryKey: ['admin.users'], queryFn: listUsers });
 
   useEffect(() => {
     fetchComments();
@@ -47,7 +50,7 @@ export function CommentApprovalQueue() {
     setLoading(true);
     let query = supabase
       .from('comments')
-      .select('id, content, user_id, message_id, created_at, status, user:user_id (username, display_name)')
+      .select('id, content, user_id, message_id, created_at, status')
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -72,16 +75,19 @@ export function CommentApprovalQueue() {
       return;
     }
 
-    const normalized = (data || []).map((comment: any) => ({
-      id: comment.id,
-      content: comment.content,
-      user_id: comment.user_id,
-      message_id: comment.message_id,
-      created_at: comment.created_at,
-      status: comment.status,
-      username: comment.user?.username || 'user',
-      display_name: comment.user?.display_name || 'Unknown',
-    }));
+    const normalized = (data || []).map((comment: any) => {
+      const user = users.find((u) => u.id === comment.user_id);
+      return {
+        id: comment.id,
+        content: comment.content,
+        user_id: comment.user_id,
+        message_id: comment.message_id,
+        created_at: comment.created_at,
+        status: comment.status,
+        username: user?.displayName || comment.user_id,
+        display_name: user?.displayName || comment.user_id,
+      };
+    });
 
     setComments(normalized);
     setLoading(false);

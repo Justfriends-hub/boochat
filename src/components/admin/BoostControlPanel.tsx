@@ -125,20 +125,8 @@ export function BoostControlPanel() {
   };
 
   const tryInsertPostBoost = async (insertObj: any) => {
-    const keys = ['chat_id', 'channel_id'] as const;
-    for (const key of keys) {
-      const withAdmin = { ...insertObj, [key]: selectedChannel, admin_id: me?.id };
-      let res = await supabase.from('post_boosts').insert([withAdmin]);
-      if (!res.error) return res;
-      if (isMissingColumnError(res.error, 'admin_id')) {
-        const withoutAdmin = { ...insertObj, [key]: selectedChannel };
-        res = await supabase.from('post_boosts').insert([withoutAdmin]);
-        if (!res.error) return res;
-      }
-      if (isMissingColumnError(res.error, key)) continue;
-      return res;
-    }
-    return { data: null, error: { message: 'Post boost insert failed due to unknown channel key', code: 'PGRST205' } };
+    const payload = { ...insertObj, chat_id: selectedChannel };
+    return await supabase.from('post_boosts').insert([payload]);
   };
 
   const loadChannelSettings = async (chatId: string) => {
