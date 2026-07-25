@@ -52,26 +52,49 @@ export function ChannelOverview({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           .eq('channel_id', channel.id);
 
         let boostCount = 0;
-        const { data: boostData, error: boostError } = await supabase.rpc('get_visible_boost', { _chat_id: channel.id, _kind: 'any' }).catch((e) => ({ data: 0, error: e }));
-        if (!boostError && boostData) {
-          boostCount = (boostData as number) || 0;
+        let boostError: any = null;
+        let boostData: any = null;
+
+        try {
+          const result = await supabase.rpc('get_visible_boost', { _chat_id: channel.id, _kind: 'any' });
+          boostData = result.data;
+          boostError = result.error;
+        } catch (error) {
+          boostError = error;
+        }
+
+        if (!boostError && boostData !== undefined && boostData !== null) {
+          boostCount = Number(boostData) || 0;
         } else {
           console.warn('[ChannelOverview] get_visible_boost failed, falling back to manual boost totals', boostError);
-          const { data: settingRows, error: settingsError } = await supabase
-            .from('channel_settings')
-            .select('boost_target')
-            .eq('chat_id', channel.id);
-          const { data: postBoostRows, error: postBoostError } = await supabase
-            .from('post_boosts')
-            .select('boost_target')
-            .eq('chat_id', channel.id);
-          if (!settingsError && settingRows) {
-            boostCount += (settingRows as any[])
+
+          const fetchTargets = async (tableName: string) => {
+            const keys = ['chat_id', 'channel_id'] as const;
+            for (const key of keys) {
+              const { data, error } = await supabase
+                .from(tableName)
+                .select('boost_target')
+                .eq(key, channel.id);
+              if (!error) return data as any[];
+              const message = `${error?.message ?? ''} ${error?.details ?? ''}`.toLowerCase();
+              if (!message.includes(`could not find the '${key}' column`) && !message.includes(`column \"${key}\" does not exist`)) {
+                console.error(`[ChannelOverview] ${tableName} lookup failed`, error);
+                return null;
+              }
+            }
+            return null;
+          };
+
+          const settingRows = await fetchTargets('channel_settings');
+          const postBoostRows = await fetchTargets('post_boosts');
+
+          if (settingRows) {
+            boostCount += settingRows
               .map((row) => Number(row.boost_target) || 0)
               .reduce((sum, value) => sum + value, 0);
           }
-          if (!postBoostError && postBoostRows) {
-            boostCount += (postBoostRows as any[])
+          if (postBoostRows) {
+            boostCount += postBoostRows
               .map((row) => Number(row.boost_target) || 0)
               .reduce((sum, value) => sum + value, 0);
           }

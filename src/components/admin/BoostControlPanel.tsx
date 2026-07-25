@@ -91,15 +91,61 @@ export function BoostControlPanel() {
     setLoadingChannels(false);
   };
 
+  const isMissingColumnError = (error: any, column: string) => {
+    const message = `${error?.message ?? ''} ${error?.details ?? ''}`.toLowerCase();
+    return message.includes(`could not find the '${column}' column`) || message.includes(`column \"${column}\" does not exist`) || message.includes(`column ${column} does not exist`);
+  };
+
+  const trySelectChannelSettings = async (chatId: string) => {
+    const keys = ['chat_id', 'channel_id'] as const;
+    for (const key of keys) {
+      const { data, error } = await supabase
+        .from('channel_settings')
+        .select('boost_target, boost_kind, boost_mode, boost_start_time, boost_end_time')
+        .eq(key, chatId)
+        .single();
+      if (!error) return { data, key, error: null };
+      if (error.code === 'PGRST116') return { data: null, key, error: null };
+      if (isMissingColumnError(error, key)) continue;
+      return { data: null, key, error };
+    }
+    return { data: null, key: 'chat_id' as const, error: null };
+  };
+
+  const tryUpsertChannelSettings = async (chatId: string, payload: any) => {
+    const keys = ['chat_id', 'channel_id'] as const;
+    for (const key of keys) {
+      const record = { ...payload, [key]: chatId };
+      const { error } = await supabase.from('channel_settings').upsert(record, { onConflict: key as string });
+      if (!error) return { error: null };
+      if (isMissingColumnError(error, key)) continue;
+      return { error };
+    }
+    return { error: { message: 'Channel settings insert failed due to unknown channel key', code: 'PGRST205' } };
+  };
+
+  const tryInsertPostBoost = async (insertObj: any) => {
+    const keys = ['chat_id', 'channel_id'] as const;
+    for (const key of keys) {
+      const withAdmin = { ...insertObj, [key]: selectedChannel, admin_id: me?.id };
+      let res = await supabase.from('post_boosts').insert([withAdmin]);
+      if (!res.error) return res;
+      if (isMissingColumnError(res.error, 'admin_id')) {
+        const withoutAdmin = { ...insertObj, [key]: selectedChannel };
+        res = await supabase.from('post_boosts').insert([withoutAdmin]);
+        if (!res.error) return res;
+      }
+      if (isMissingColumnError(res.error, key)) continue;
+      return res;
+    }
+    return { data: null, error: { message: 'Post boost insert failed due to unknown channel key', code: 'PGRST205' } };
+  };
+
   const loadChannelSettings = async (chatId: string) => {
     setLoadingSettings(true);
-    const { data, error } = await supabase
-      .from('channel_settings')
-      .select('boost_target, boost_kind, boost_mode, boost_start_time, boost_end_time')
-      .eq('chat_id', chatId)
-      .single();
+    const { data, error } = await trySelectChannelSettings(chatId);
 
-    if (error && error.code !== 'PGRST116') {
+    if (error) {
       console.error('[BoostControlPanel] loadChannelSettings', error);
       toast.error('Unable to load channel settings');
       setSettings(null);
@@ -152,17 +198,13 @@ export function BoostControlPanel() {
 
     if (boostKind === 'subscribers') {
       // update channel-level subscriber boost only
-      const res = await supabase.from('channel_settings').upsert(
-        {
-          chat_id: selectedChannel,
-          boost_target: parseInt(targetCount, 10),
-          boost_kind: boostKind,
-          boost_mode: boostMode,
-          boost_start_time: boostMode === 'gradual' ? now.toISOString() : null,
-          boost_end_time: boostMode === 'gradual' ? endTime.toISOString() : null,
-        },
-        { onConflict: ['chat_id'] }
-      );
+      const res = await tryUpsertChannelSettings(selectedChannel, {
+        boost_target: parseInt(targetCount, 10),
+        boost_kind: boostKind,
+        boost_mode: boostMode,
+        boost_start_time: boostMode === 'gradual' ? now.toISOString() : null,
+        boost_end_time: boostMode === 'gradual' ? endTime.toISOString() : null,
+      });
       error = res.error;
     } else {
       // create a per-post boost; do not modify channel_settings so subscriber boost remains
@@ -173,8 +215,6 @@ export function BoostControlPanel() {
       }
 
       const insertObj: any = {
-        admin_id: me?.id,
-        chat_id: selectedChannel,
         message_id: selectedMessage,
         boost_kind: boostKind,
         boost_target: parseInt(targetCount, 10),
@@ -184,7 +224,7 @@ export function BoostControlPanel() {
         reaction: boostKind === 'likes' ? reaction || null : null,
       };
 
-      const res = await supabase.from('post_boosts').insert([insertObj]);
+      const res = await tryInsertPostBoost(insertObj);
       error = res.error;
     }
 

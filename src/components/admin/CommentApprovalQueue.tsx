@@ -38,6 +38,11 @@ export function CommentApprovalQueue() {
     fetchComments();
   }, [filter]);
 
+  const isMissingTableError = (error: any) => {
+    const message = `${error?.message ?? ''} ${error?.details ?? ''}`.toLowerCase();
+    return message.includes('could not find the table') || error?.code === 'PGRST205';
+  };
+
   const fetchComments = async () => {
     setLoading(true);
     let query = supabase
@@ -52,6 +57,14 @@ export function CommentApprovalQueue() {
 
     const { data, error } = await query;
     if (error) {
+      if (isMissingTableError(error)) {
+        console.warn('[CommentApprovalQueue] comments table missing, skipping queue load');
+        setComments([]);
+        setLoading(false);
+        setPage(1);
+        setSelected(new Set());
+        return;
+      }
       console.error('[CommentApprovalQueue] fetchComments', error);
       toast.error('Unable to load comments');
       setComments([]);
@@ -83,6 +96,10 @@ export function CommentApprovalQueue() {
       .eq('id', commentId);
 
     if (error) {
+      if (isMissingTableError(error)) {
+        toast.error('Comments queue is unavailable on this backend');
+        return;
+      }
       console.error('[CommentApprovalQueue] handleAction', error);
       toast.error('Failed to update comment');
       return;
