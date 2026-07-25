@@ -75,7 +75,7 @@ function toDayEnd(s: string) { return s ? new Date(s + "T23:59:59.999").getTime(
 
 function AdminPage() {
   const me = useAuth();
-  const nav = useNavigate({ from: "/chats" });
+  const nav = useNavigate();
   const search = Route.useSearch();
   const qc = useQueryClient();
   const [boostFor, setBoostFor] = useState<string | null>(null);
@@ -84,7 +84,7 @@ function AdminPage() {
   const [editChannelOpen, setEditChannelOpen] = useState<string | null>(null);
 
   useEffect(() => {
-    if (me && normalizeRole(me.role) !== "owner") nav({ to: "/chats" });
+    if (me && normalizeRole(me.role) !== "owner") nav({ to: "/" });
   }, [me, nav]);
   useEffect(() => { seedAdminExtras(); }, []);
 
