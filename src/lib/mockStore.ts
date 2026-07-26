@@ -33,6 +33,7 @@ export type User = {
   displayName: string;
   avatar: string;
   role: Role;
+  isUpgraded?: boolean;
   banned?: boolean;
   online?: boolean;
   bio?: string;
@@ -154,6 +155,17 @@ export type AuditLog = {
   createdAt: number;
 };
 
+export type QuickReply = {
+  id: string;
+  userId: string;
+  shortcut: string;
+  title: string;
+  body: string;
+  position: number;
+  createdAt: number;
+  updatedAt?: number;
+};
+
 export type Draft = { chatId: string; text: string };
 
 export type JoinRequestStatus = "pending" | "approved" | "rejected";
@@ -174,6 +186,7 @@ export type Store = {
   boosts: Boost[];
   reports: Report[];
   auditLogs: AuditLog[];
+  quickReplies: QuickReply[];
   session: { userId: string } | null;
 };
 
@@ -183,6 +196,7 @@ const empty: Store = {
   users: [], chats: [], messages: [], statuses: [],
   channels: [], channelPosts: [], comments: [],
   boosts: [], reports: [], auditLogs: [], session: null,
+  quickReplies: [],
 };
 
 // Initialize state from localStorage immediately so the UI can render a cached

@@ -157,6 +157,46 @@ export async function editUserProfile(
   publish("users:changed");
 }
 
+export async function setUserUpgraded(userId: string, adminId: string, upgraded: boolean) {
+  try {
+    const client = ensureSupabase();
+    const update: Record<string, any> = { is_upgraded: upgraded };
+    if (upgraded) {
+      update.upgraded_at = new Date().toISOString();
+      update.upgraded_by = adminId;
+    } else {
+      update.upgraded_at = null;
+      update.upgraded_by = null;
+    }
+    const { error } = await client.from("profiles").update(update).eq("id", userId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("setUserUpgraded: supabase update failed, applying locally:", err);
+  }
+
+  setState((s) => {
+    const u = s.users.find((x) => x.id === userId);
+    if (u) u.isUpgraded = upgraded;
+  });
+
+  audit({ adminId, action: upgraded ? "grant_upgrade" : "revoke_upgrade", targetType: "user", targetId: userId });
+  publish("users:changed");
+}
+
+export async function listUpgradedUsers() {
+  try {
+    const client = ensureSupabase();
+    const { data, error } = await client.from("profiles").select("id,email,display_name,upgraded_at,upgraded_by").eq("is_upgraded", true).order("upgraded_at", { ascending: false });
+    if (!error && data) {
+      return data;
+    }
+  } catch (err) {
+    console.warn("listUpgradedUsers: supabase query failed, falling back to local:", err);
+  }
+  // Fallback: derive from local store
+  return getState().users.filter((u) => (u as any).isUpgraded).map((u) => ({ id: u.id, email: u.email, display_name: u.displayName, upgraded_at: null, upgraded_by: null }));
+}
+
 export async function resetUserPassword(userId: string, adminId: string) {
   // NOTE: resetting a user's auth password requires the Supabase service_role key
   // and must be performed server-side (Edge Function / serverless) — the client

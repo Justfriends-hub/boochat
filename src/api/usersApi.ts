@@ -55,6 +55,7 @@ function mapProfileSync(profile: any): User {
     online: profile.online ?? false,
     banned: profile.banned ?? false,
     bio: profile.bio ?? undefined,
+    isUpgraded: !!profile.is_upgraded,
   };
 }
 
@@ -77,7 +78,7 @@ export async function listUsers(): Promise<User[]> {
     const supabase = ensureSupabase();
     const { data, error } = await supabase
       .from("profiles")
-      .select("id,email,display_name,avatar_url,bio,online,banned")
+      .select("id,email,display_name,avatar_url,bio,online,banned,is_upgraded")
       .order("display_name", { ascending: true });
 
     const { data: roleRows, error: rolesError } = await supabase
@@ -124,7 +125,7 @@ export async function getUser(id: string): Promise<User | undefined> {
     const supabase = ensureSupabase();
     const { data, error } = await supabase
       .from("profiles")
-      .select("id,email,display_name,avatar_url,bio,online,banned")
+      .select("id,email,display_name,avatar_url,bio,online,banned,is_upgraded")
       .eq("id", id)
       .single();
 

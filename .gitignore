@@ -33,3 +33,4 @@ dist-ssr
 task4_dedup_dm.sql
 migrations/2026-07-24_add_status_privacy.sql
 mycurrentschema.sql
+/.supabase_quick_replies.sql

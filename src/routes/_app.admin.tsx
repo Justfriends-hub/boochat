@@ -19,6 +19,7 @@ import { CommentApprovalQueue } from "@/components/admin/CommentApprovalQueue";
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -27,6 +28,7 @@ import { BoostDialog } from "@/components/BoostDialog";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
 import {
   overviewStats, toggleBan, deletePostAsAdmin,
+  setUserUpgraded, listUpgradedUsers,
   listBoosts, listAuditLogs, listReports, seedAdminExtras,
   editUserProfile, resetUserPassword, forceLogoutUser,
   editGroup, deleteGroup, removeGroupMember, transferGroupOwnership,
@@ -93,6 +95,7 @@ function AdminPage() {
 
   const { data: stats } = useQuery({ queryKey: ["admin.stats"], queryFn: overviewStats });
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const { data: upgradedRows = [] } = useQuery({ queryKey: ["admin.upgraded"], queryFn: listUpgradedUsers });
   const { data: posts = [] } = useQuery({ queryKey: ["admin.posts"], queryFn: () => listPosts() });
   const { data: channels = [] } = useQuery({ queryKey: ["admin.channels"], queryFn: listChannels });
   const { data: groups = [] } = useQuery({ queryKey: ["admin.groups"], queryFn: () => getState().chats.filter((c) => c.type === "group") });
@@ -213,6 +216,7 @@ function AdminPage() {
                     <TableHead>User</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Upgraded</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -235,6 +239,15 @@ function AdminPage() {
                         }`}>
                           {normalizeRole(u.role)}
                         </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center">
+                          <Switch checked={(u as any).isUpgraded} onCheckedChange={async (val) => {
+                            await setUserUpgraded(u.id, me.id, !!val);
+                            qc.invalidateQueries({ queryKey: ["users"] });
+                            qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
+                          }} />
+                        </div>
                       </TableCell>
                       <TableCell>
                         {u.banned ? <span className="text-destructive font-medium">Banned</span> : "Active"}

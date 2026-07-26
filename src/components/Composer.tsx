@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Send, Paperclip, Mic, X, Smile } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import QuickReplyPicker from "@/components/QuickReplyPicker";
+import { useAuth } from "@/hooks/useAuth";
 
 export type ComposerAttachment =
   | { kind: "image"; file: File; body: string } // body = object URL for preview
@@ -37,6 +39,10 @@ export function Composer({
   const shouldSendAfterStop = useRef(false);
 
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const user = useAuth();
+
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
@@ -287,7 +293,21 @@ export function Composer({
                   id="composer-input"
                   ref={textareaRef}
                   value={value}
-                  onChange={(e) => onChange(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    onChange(v);
+                    const caret = (e.target.selectionStart as number) || v.length;
+                    const lineStart = Math.max(0, v.lastIndexOf("\n", caret - 1) + 1);
+                    const isAtLineStartSlash = v[lineStart] === "/";
+                    const shouldOpen = !!user?.isUpgraded && isAtLineStartSlash;
+                    if (shouldOpen) {
+                      const q = v.substring(lineStart + 1, caret);
+                      setPickerQuery(q);
+                      setShowPicker(true);
+                    } else {
+                      setShowPicker(false);
+                    }
+                  }}
                   onFocus={() => {
                     window.scrollTo(0, 0);
                     if (document.body) document.body.scrollTop = 0;
@@ -303,7 +323,12 @@ export function Composer({
                   disabled={disabled}
                   rows={1}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
+                    if (showPicker && e.key === "Escape") {
+                      e.preventDefault();
+                      setShowPicker(false);
+                      return;
+                    }
+                    if (e.key === "Enter" && !e.shiftKey && !showPicker) {
                       e.preventDefault();
                       send();
                     } else if (e.key === "Escape" && (replyTo || value)) {
@@ -317,6 +342,35 @@ export function Composer({
                   )}
                   style={{ maxHeight: 128, fontSize: "16px" }}
                 />
+                {showPicker && (
+                  <div className="absolute left-4 bottom-20 z-50">
+                    <QuickReplyPicker
+                      query={pickerQuery}
+                      onClose={() => setShowPicker(false)}
+                      onSelect={(qr) => {
+                        // Replace the "/shortcut" on the current line with the quick reply body
+                        const el = textareaRef.current;
+                        if (!el) return;
+                        const caret = el.selectionStart || value.length;
+                        const lineStart = Math.max(0, value.lastIndexOf("\n", caret - 1) + 1);
+                        const before = value.substring(0, lineStart);
+                        const after = value.substring(caret);
+                        const inserted = qr.body;
+                        const next = before + inserted + after;
+                        onChange(next);
+                        setShowPicker(false);
+                        // place caret after inserted text
+                        requestAnimationFrame(() => {
+                          if (textareaRef.current) {
+                            const pos = (before + inserted).length;
+                            textareaRef.current.selectionStart = textareaRef.current.selectionEnd = pos;
+                            textareaRef.current.focus();
+                          }
+                        });
+                      }}
+                    />
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={insertEmoji}

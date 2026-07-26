@@ -8,6 +8,9 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { InstallButton } from "@/components/InstallButton";
 import { useAuth } from "@/hooks/useAuth";
+import { FeatureBoundary } from "@/components/FeatureBoundary";
+import { listQuickReplies, createQuickReply, deleteQuickReply, updateQuickReply, reorderQuickReplies } from "@/api/quickRepliesApi";
+import { useEffect } from "react";
 import { signOut, updateProfile } from "@/api/authApi";
 import { LogOut, ShieldCheck, Camera, Loader2, Pencil, X, Check } from "lucide-react";
 import { normalizeRole } from "@/lib/mockStore";
@@ -18,6 +21,76 @@ export const Route = createFileRoute("/_app/settings")({
   component: SettingsPage,
   head: () => ({ meta: [{ title: "Settings — boochat" }] }),
 });
+
+function QuickRepliesManager({ meId }: { meId: string }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [shortcut, setShortcut] = useState("");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    listQuickReplies(meId).then((res) => { if (mounted) setItems(res); }).finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [meId]);
+
+  const refresh = async () => { setLoading(true); const res = await listQuickReplies(meId); setItems(res); setLoading(false); };
+
+  const handleAdd = async () => {
+    try {
+      await createQuickReply(meId, { shortcut: shortcut.trim(), title: title.trim() || shortcut.trim(), body: body });
+      setShortcut(""); setTitle(""); setBody("");
+      await refresh();
+    } catch (err: any) {
+      alert(err.message || String(err));
+    }
+  };
+
+  const handleDelete = async (id: string) => { if (!confirm("Delete this quick reply?")) return; await deleteQuickReply(id); await refresh(); };
+
+  const move = async (idx: number, dir: -1 | 1) => {
+    const next = [...items];
+    const ni = idx + dir;
+    if (ni < 0 || ni >= next.length) return;
+    const tmp = next[idx]; next[idx] = next[ni]; next[ni] = tmp;
+    setItems(next);
+    await reorderQuickReplies(meId, next.map((x) => x.id));
+  };
+
+  return (
+    <div>
+      <div className="grid grid-cols-3 gap-2">
+        <Input placeholder="shortcut (e.g. pricing)" value={shortcut} onChange={(e)=>setShortcut(e.target.value)} />
+        <Input placeholder="title" value={title} onChange={(e)=>setTitle(e.target.value)} />
+        <Input placeholder="body" value={body} onChange={(e)=>setBody(e.target.value)} />
+      </div>
+      <div className="flex gap-2 mt-2">
+        <Button onClick={handleAdd} disabled={loading || items.length >= 50}>Add</Button>
+        <div className="text-sm text-muted-foreground self-center">{items.length}/50 used</div>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {loading ? <div>Loading…</div> : (
+          items.map((it, idx) => (
+            <div key={it.id} className="flex items-center justify-between gap-2 border rounded p-2">
+              <div className="min-w-0">
+                <div className="font-medium truncate">{it.title} <span className="text-xs text-muted-foreground">/{it.shortcut}</span></div>
+                <div className="text-sm text-muted-foreground truncate">{it.body}</div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button size="icon" variant="ghost" onClick={()=>move(idx, -1)} aria-label="Move up">▲</Button>
+                <Button size="icon" variant="ghost" onClick={()=>move(idx, 1)} aria-label="Move down">▼</Button>
+                <Button size="icon" variant="ghost" onClick={()=>handleDelete(it.id)} aria-label="Delete">✕</Button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 function SettingsPage() {
   const me = useAuth();
@@ -219,6 +292,23 @@ function SettingsPage() {
             )}
           </div>
         </Card>
+
+        {/* ── Quick Replies (Feature) ── */}
+        <FeatureBoundary name="quick_replies">
+          {me.isUpgraded ? (
+            <Card className="p-4 space-y-3">
+              <Label className="text-xs uppercase text-muted-foreground">Quick Replies</Label>
+              <QuickRepliesManager meId={me.id} />
+            </Card>
+          ) : (
+            <Card className="p-4">
+              <Label className="text-xs uppercase text-muted-foreground">Quick Replies</Label>
+              <div className="mt-2 text-sm text-muted-foreground">
+                Upgrade to unlock Quick Replies and more — ask an admin to grant the upgrade.
+              </div>
+            </Card>
+          )}
+        </FeatureBoundary>
 
         {/* ── Appearance ── */}
         <Card className="p-4 space-y-3">

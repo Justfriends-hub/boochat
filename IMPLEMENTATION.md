@@ -1,3 +1,29 @@
+Feature: Upgraded / Premium users + Quick Replies
+
+Overview
+-- Add per-user "upgraded" flag to profiles and a new `quick_replies` table.
+-- RLS enforces that quick replies are only accessible to their owner.
+-- Max 50 quick replies per user is enforced in the API layer (not hard-coded in SQL).
+
+Files added/changed
+- db/migrations/20260726_add_quick_replies_and_upgraded.sql: adds `is_upgraded`, `upgraded_at`, `upgraded_by` to `profiles`, creates `quick_replies`, RLS policies.
+- src/lib/mockStore.ts: add `QuickReply` type and sample mock data shape.
+- src/api/quickRepliesApi.ts: new API layer for CRUD/reorder/search; enforces 50-item limit and upgrade gating.
+- src/api/adminApi.ts: add `setUserUpgraded` and `listUpgradedUsers` with audit() calls.
+- src/components/QuickReplyPicker.tsx: popover picker using existing command UI primitives and `searchQuickReplies`.
+- src/components/Composer.tsx: integrate picker when typing "/" at start of line for upgraded users.
+- src/routes/_app.settings.tsx: Quick Replies management UI (gated by FeatureBoundary).
+- src/routes/_app.admin.tsx: add upgraded toggle/badge in admin user table (owner-only).
+
+Notes / Decisions
+- Do NOT change existing `Role` type or admin gating logic; `is_upgraded` is independent and does not grant admin access.
+- RLS policy naming follows existing conventions in RLS_SETUP.md.
+- The per-user 50-item limit is enforced in the API layer and client; SQL has a comment noting this.
+- Use shared helper `isUpgraded(user)` in code to make future feature checks easier (add when wiring components).
+
+Next steps performed by this branch
+1. Migration file added (apply to Supabase SQL Editor).
+2. Add API, components, and UI changes in subsequent commits.
 # Admin Panel Implementation — boochat
 
 This document provides the admin UI components and the DB wiring notes required to implement the requested admin panel features: Boost control, Channel overview/analytics, and Comment approval queue.
