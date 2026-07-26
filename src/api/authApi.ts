@@ -30,6 +30,7 @@ function toUser(profile: any, roles: Array<{ role: string }> | null = null): Use
     online: profile.online ?? false,
     banned: profile.banned ?? false,
     bio: profile.bio ?? undefined,
+    isUpgraded: !!profile.is_upgraded,
     // Carry the raw path so callers can resolve it if needed
     _avatarPath: rawAvatar && !/^https?:\/\//i.test(rawAvatar) ? rawAvatar : undefined,
   } as User & { _avatarPath?: string };
@@ -172,7 +173,7 @@ async function refreshCurrentUser(userId: string) {
     const client = ensureSupabase();
     const { data: profile, error: profileError } = await client
       .from("profiles")
-      .select("id,email,display_name,avatar_url,bio,online,banned")
+      .select("id,email,display_name,avatar_url,bio,online,banned,is_upgraded")
       .eq("id", userId)
       .single();
 
