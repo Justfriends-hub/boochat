@@ -162,15 +162,18 @@ function AdminPage() {
   }, [boosts, users, search.bo_user, search.bo_kind, search.bo_from, search.bo_to]);
 
   const handleUpgradeToggle = async (userId: string, upgraded: boolean) => {
+    // Apply optimistic update immediately
     qc.setQueryData(["users"], (old: any) =>
       old?.map((item: any) => (item.id === userId ? { ...item, isUpgraded: upgraded } : item)),
     );
     try {
       await setUserUpgraded(userId, me.id, upgraded);
+      // On success, keep the optimistic update and just refresh the admin upgraded list
+      qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
     } catch (err) {
       console.warn("Upgrade toggle failed:", err);
       toast.error("Unable to update upgrade state.\nPlease try again.");
-    } finally {
+      // On error, refetch both queries to restore server state
       qc.invalidateQueries({ queryKey: ["users"] });
       qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
     }
