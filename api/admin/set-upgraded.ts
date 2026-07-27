@@ -13,7 +13,17 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { userId, upgraded } = req.body;
+  let body: any = req.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch (parseError) {
+      console.warn("set-upgraded: body parse failed", parseError);
+      return res.status(400).json({ error: "Invalid JSON body" });
+    }
+  }
+
+  const { userId, upgraded } = body ?? {};
   if (!userId || typeof userId !== "string") {
     return res.status(400).json({ error: "userId is required and must be a string" });
   }
@@ -22,7 +32,7 @@ export default async function handler(
   }
 
   console.log("set-upgraded: checking environment variables");
-  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   const hasUrl = !!supabaseUrl;
   const hasKey = !!serviceRoleKey;
@@ -44,7 +54,7 @@ export default async function handler(
     return res.status(500).json({ error: "Server misconfigured: Missing Supabase credentials" });
   }
 
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers.authorization ?? (req.headers as any).Authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     console.warn("set-upgraded: missing or invalid auth header");
     return res.status(401).json({ error: "Not authenticated" });

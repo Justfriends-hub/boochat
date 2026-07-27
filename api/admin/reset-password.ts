@@ -29,19 +29,30 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { userId } = req.body;
+  let body: any = req.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch (parseError) {
+      console.warn("reset-password: body parse failed", parseError);
+      return res.status(400).json({ error: "Invalid JSON body" });
+    }
+  }
+
+  const { userId } = body ?? {};
   if (!userId || typeof userId !== "string") {
     return res.status(400).json({ error: "userId is required and must be a string" });
   }
 
   // Validate environment variables
-  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceRoleKey) {
     console.error("Missing Supabase environment variables");
     console.error(
       "reset-password: env SUPABASE_URL=", !!process.env.SUPABASE_URL,
       "VITE_SUPABASE_URL=", !!process.env.VITE_SUPABASE_URL,
+      "NEXT_PUBLIC_SUPABASE_URL=", !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       "SUPABASE_SERVICE_ROLE_KEY=", !!process.env.SUPABASE_SERVICE_ROLE_KEY,
       "VITE_SUPABASE_SERVICE_ROLE_KEY=", !!process.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
     );
@@ -49,7 +60,7 @@ export default async function handler(
   }
 
   // Extract Authorization header (Bearer token from client session)
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers.authorization ?? (req.headers as any).Authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Not authenticated. Provide Authorization: Bearer <token>" });
   }
