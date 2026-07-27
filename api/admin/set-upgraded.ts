@@ -22,9 +22,22 @@ export default async function handler(
   }
 
   console.log("set-upgraded: checking environment variables");
-  const hasUrl = !!process.env.SUPABASE_URL;
-  const hasKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-  console.log("SUPABASE_URL:", hasUrl, "SUPABASE_SERVICE_ROLE_KEY:", hasKey);
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  const hasUrl = !!supabaseUrl;
+  const hasKey = !!serviceRoleKey;
+  console.log(
+    "set-upgraded: env supabaseUrl=", hasUrl,
+    "(SUPABASE_URL=", !!process.env.SUPABASE_URL,
+    "VITE_SUPABASE_URL=", !!process.env.VITE_SUPABASE_URL,
+    ")",
+  );
+  console.log(
+    "set-upgraded: env serviceRoleKey=", hasKey,
+    "(SUPABASE_SERVICE_ROLE_KEY=", !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    "VITE_SUPABASE_SERVICE_ROLE_KEY=", !!process.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+    ")",
+  );
   
   if (!hasUrl || !hasKey) {
     console.error("Missing Supabase server environment variables");
@@ -41,7 +54,7 @@ export default async function handler(
   
   console.log("set-upgraded: creating Supabase client");
   try {
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     console.log("set-upgraded: verifying token for user");
     const { data: userData, error: userError } = await supabase.auth.getUser(token);

@@ -178,12 +178,10 @@ function AdminPage() {
     } catch (err: any) {
       console.warn("Upgrade toggle failed:", err);
       const message = typeof err?.message === "string" ? err.message : "Unable to update upgrade state.";
-      if (message.includes("Admin endpoint error")) {
-        toast.error(
-          "Admin endpoint blocked or misconfigured. Please check server config and VITE_SUPABASE_ADMIN_SET_UPGRADED_URL.",
-        );
+      if (message.includes("Admin endpoint error") || message.includes("Server misconfigured")) {
+        toast.error(`Admin endpoint error: ${message}`);
       } else {
-        toast.error("Unable to update upgrade state.\nPlease try again.");
+        toast.error(`Unable to update upgrade state: ${message}`);
       }
       // On error, refetch both queries to restore server state
       qc.invalidateQueries({ queryKey: ["users"] });

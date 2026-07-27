@@ -35,8 +35,16 @@ export default async function handler(
   }
 
   // Validate environment variables
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
     console.error("Missing Supabase environment variables");
+    console.error(
+      "reset-password: env SUPABASE_URL=", !!process.env.SUPABASE_URL,
+      "VITE_SUPABASE_URL=", !!process.env.VITE_SUPABASE_URL,
+      "SUPABASE_SERVICE_ROLE_KEY=", !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      "VITE_SUPABASE_SERVICE_ROLE_KEY=", !!process.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+    );
     return res.status(500).json({ error: "Server misconfigured" });
   }
 
@@ -51,8 +59,8 @@ export default async function handler(
   try {
     // Create a client with the service role key to verify the token and perform admin actions
     const supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      supabaseUrl,
+      serviceRoleKey
     );
 
     // Verify the token and get the user's session
