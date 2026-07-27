@@ -18,8 +18,8 @@ export default async function handler(
   }
 
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("Missing Supabase server environment variables");
-    return res.status(500).json({ error: "Server misconfigured" });
+    console.error("Missing Supabase server environment variables. SUPABASE_URL:", !!process.env.SUPABASE_URL, "SUPABASE_SERVICE_ROLE_KEY:", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+    return res.status(500).json({ error: "Server misconfigured: Missing Supabase credentials" });
   }
 
   const authHeader = req.headers.authorization;
@@ -31,28 +31,38 @@ export default async function handler(
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   try {
+    console.log("set-upgraded: verifying token for user");
     const { data: userData, error: userError } = await supabase.auth.getUser(token);
     if (userError || !userData?.user) {
-      console.warn("set-upgraded: invalid token", userError);
+      console.warn("set-upgraded: token verification failed", userError?.message);
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
     const adminUserId = userData.user.id;
+    console.log("set-upgraded: checking admin role for", adminUserId);
+    
     const { data: roleRow, error: roleError } = await supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", adminUserId)
       .single();
 
-    if (roleError || !roleRow || typeof roleRow.role !== "string") {
-      console.warn("set-upgraded: admin role lookup failed", roleError);
-      return res.status(403).json({ error: "Unauthorized" });
+    if (roleError) {
+      console.warn("set-upgraded: role query failed:", roleError.message);
+      return res.status(403).json({ error: `Role check failed: ${roleError.message}` });
+    }
+
+    if (!roleRow || typeof roleRow.role !== "string") {
+      console.warn("set-upgraded: invalid role data:", roleRow);
+      return res.status(403).json({ error: "Unauthorized: No valid role" });
     }
 
     if (roleRow.role !== "owner") {
-      return res.status(403).json({ error: "Only owner users can perform this action" });
+      console.warn("set-upgraded: user is not owner, role is:", roleRow.role);
+      return res.status(403).json({ error: `Unauthorized: User role is ${roleRow.role}, only owner can perform this action` });
     }
 
+    console.log("set-upgraded: updating user", userId, "to upgraded:", upgraded);
     const update: Record<string, any> = { is_upgraded: upgraded };
     if (upgraded) {
       update.upgraded_at = new Date().toISOString();
@@ -68,13 +78,14 @@ export default async function handler(
       .eq("id", userId);
 
     if (updateError) {
-      console.error("set-upgraded: profile update failed", updateError);
-      return res.status(400).json({ error: updateError.message });
+      console.error("set-upgraded: profile update failed:", updateError.message, updateError.details);
+      return res.status(400).json({ error: `Profile update failed: ${updateError.message}` });
     }
 
+    console.log("set-upgraded: success for user", userId);
     return res.status(200).json({ success: true });
   } catch (err: any) {
-    console.error("set-upgraded: unexpected error", err);
-    return res.status(500).json({ error: err?.message || "Internal server error" });
+    console.error("set-upgraded: unexpected error:", err?.message || err);
+    return res.status(500).json({ error: `Unexpected error: ${err?.message || "Internal server error"}` });
   }
 }
