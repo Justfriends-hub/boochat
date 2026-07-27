@@ -162,19 +162,46 @@ function AdminPage() {
   }, [boosts, users, search.bo_user, search.bo_kind, search.bo_from, search.bo_to]);
 
   const handleUpgradeToggle = async (userId: string, upgraded: boolean) => {
+    const adminId = me?.id;
+    if (!adminId) {
+      toast.error("Unable to update upgrade state: admin user not available.");
+      return;
+    }
+
+    const previousUsers = qc.getQueryData<any[]>(["users"]);
+    const previousUpgraded = qc.getQueryData<any[]>(["admin.upgraded"]);
+
     // Apply optimistic update immediately
     qc.setQueryData(["users"], (old: any) =>
       old?.map((item: any) => (item.id === userId ? { ...item, isUpgraded: upgraded } : item)),
     );
+    qc.setQueryData(["admin.upgraded"], (old: any[]) => {
+      if (upgraded) {
+        if (old?.some((item: any) => item.id === userId)) return old;
+        const user = previousUsers?.find((item: any) => item.id === userId);
+        if (!user) return old ?? [];
+        return [
+          ...(old ?? []),
+          {
+            id: userId,
+            email: user.email,
+            display_name: user.displayName,
+            upgraded_at: new Date().toISOString(),
+            upgraded_by: adminId,
+          },
+        ];
+      }
+      return old?.filter((item: any) => item.id !== userId) ?? [];
+    });
+
     try {
-      const result = await setUserUpgraded(userId, me.id, upgraded);
+      const result = await setUserUpgraded(userId, adminId, upgraded);
       if (!result.adminEndpointWorked) {
         toast.error(
           "Admin upgrade endpoint blocked or misconfigured. Upgrade may still succeed via fallback, but the endpoint needs fixing.",
         );
       }
-      qc.invalidateQueries({ queryKey: ["users"] });
-      qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
+      // Keep optimistic state in place until the next natural refresh.
     } catch (err: any) {
       console.warn("Upgrade toggle failed:", err);
       const message = typeof err?.message === "string" ? err.message : "Unable to update upgrade state.";
@@ -183,7 +210,8 @@ function AdminPage() {
       } else {
         toast.error(`Unable to update upgrade state: ${message}`);
       }
-      // On error, refetch both queries to restore server state
+      qc.setQueryData(["users"], previousUsers);
+      qc.setQueryData(["admin.upgraded"], previousUpgraded);
       qc.invalidateQueries({ queryKey: ["users"] });
       qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
     }
