@@ -167,13 +167,24 @@ function AdminPage() {
       old?.map((item: any) => (item.id === userId ? { ...item, isUpgraded: upgraded } : item)),
     );
     try {
-      await setUserUpgraded(userId, me.id, upgraded);
-      // On success, refetch both to ensure server state is in sync
+      const result = await setUserUpgraded(userId, me.id, upgraded);
+      if (!result.adminEndpointWorked) {
+        toast.error(
+          "Admin upgrade endpoint blocked or misconfigured. Upgrade may still succeed via fallback, but the endpoint needs fixing.",
+        );
+      }
       qc.invalidateQueries({ queryKey: ["users"] });
       qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Upgrade toggle failed:", err);
-      toast.error("Unable to update upgrade state.\nPlease try again.");
+      const message = typeof err?.message === "string" ? err.message : "Unable to update upgrade state.";
+      if (message.includes("Admin endpoint error")) {
+        toast.error(
+          "Admin endpoint blocked or misconfigured. Please check server config and VITE_SUPABASE_ADMIN_SET_UPGRADED_URL.",
+        );
+      } else {
+        toast.error("Unable to update upgrade state.\nPlease try again.");
+      }
       // On error, refetch both queries to restore server state
       qc.invalidateQueries({ queryKey: ["users"] });
       qc.invalidateQueries({ queryKey: ["admin.upgraded"] });

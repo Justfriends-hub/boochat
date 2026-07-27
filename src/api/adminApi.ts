@@ -158,35 +158,72 @@ export async function editUserProfile(
 }
 
 export async function setUserUpgraded(userId: string, adminId: string, upgraded: boolean) {
+  const fnUrl = import.meta.env.VITE_SUPABASE_ADMIN_SET_UPGRADED_URL ?? "/api/admin/set-upgraded";
   let success = false;
+  let adminEndpointWorked = false;
+  let adminEndpointError: string | null = null;
+
   try {
-    const client = ensureSupabase();
-    const update: Record<string, any> = { is_upgraded: upgraded };
-    if (upgraded) {
-      update.upgraded_at = new Date().toISOString();
-      update.upgraded_by = adminId;
-    } else {
-      update.upgraded_at = null;
-      update.upgraded_by = null;
+    const supabase = ensureSupabase();
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (!session?.access_token) throw new Error("No valid session found.");
+
+    const res = await fetch(fnUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ userId, upgraded }),
+    });
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      adminEndpointError = json.error || `Admin update failed with status ${res.status}`;
+      throw new Error(adminEndpointError);
     }
-    const { error } = await client.from("profiles").update(update).eq("id", userId);
-    if (error) throw error;
+
+    adminEndpointWorked = true;
     success = true;
-  } catch (err) {
-    console.warn("setUserUpgraded: supabase update failed, applying locally:", err);
+  } catch (err: any) {
+    adminEndpointError = adminEndpointError || err?.message || String(err);
+    console.warn("setUserUpgraded: admin function failed, falling back to direct update:", adminEndpointError);
+    try {
+      const client = ensureSupabase();
+      const update: Record<string, any> = { is_upgraded: upgraded };
+      if (upgraded) {
+        update.upgraded_at = new Date().toISOString();
+        update.upgraded_by = adminId;
+      } else {
+        update.upgraded_at = null;
+        update.upgraded_by = null;
+      }
+      const { error } = await client.from("profiles").update(update).eq("id", userId);
+      if (error) throw error;
+      success = true;
+    } catch (fallbackErr: any) {
+      console.warn("setUserUpgraded: fallback update failed:", fallbackErr);
+      throw new Error(
+        `Failed to persist upgrade state to Supabase. Admin endpoint error: ${adminEndpointError || String(fallbackErr)}`,
+      );
+    }
   }
 
-  setState((s) => {
-    const u = s.users.find((x) => x.id === userId);
-    if (u) u.isUpgraded = upgraded;
-  });
-
-  audit({ adminId, action: upgraded ? "grant_upgrade" : "revoke_upgrade", targetType: "user", targetId: userId });
-  publish("users:changed");
-
-  if (!success) {
-    throw new Error("Failed to persist upgrade state to Supabase");
+  if (success) {
+    setState((s) => {
+      const u = s.users.find((x) => x.id === userId);
+      if (u) u.isUpgraded = upgraded;
+    });
+    audit({ adminId, action: upgraded ? "grant_upgrade" : "revoke_upgrade", targetType: "user", targetId: userId });
+    publish("users:changed");
+    return { adminEndpointWorked, adminEndpointError };
   }
+
+  throw new Error("Failed to persist upgrade state to Supabase");
 }
 
 export async function listUpgradedUsers() {
