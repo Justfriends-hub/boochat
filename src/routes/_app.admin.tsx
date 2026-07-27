@@ -161,6 +161,21 @@ function AdminPage() {
     });
   }, [boosts, users, search.bo_user, search.bo_kind, search.bo_from, search.bo_to]);
 
+  const handleUpgradeToggle = async (userId: string, upgraded: boolean) => {
+    qc.setQueryData(["users"], (old: any) =>
+      old?.map((item: any) => (item.id === userId ? { ...item, isUpgraded: upgraded } : item)),
+    );
+    try {
+      await setUserUpgraded(userId, me.id, upgraded);
+    } catch (err) {
+      console.warn("Upgrade toggle failed:", err);
+      toast.error("Unable to update upgrade state.\nPlease try again.");
+    } finally {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
+    }
+  };
+
   if (!me || normalizeRole(me.role) !== "owner") return null;
 
   const statCards = [
@@ -242,11 +257,11 @@ function AdminPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center">
-                          <Switch checked={(u as any).isUpgraded} onCheckedChange={async (val) => {
-                            await setUserUpgraded(u.id, me.id, !!val);
-                            qc.invalidateQueries({ queryKey: ["users"] });
-                            qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
-                          }} />
+                          <Switch
+                            checked={!!u.isUpgraded}
+                            onCheckedChange={(val) => handleUpgradeToggle(u.id, !!val)}
+                            aria-label={`Toggle upgrade status for ${u.displayName}`}
+                          />
                         </div>
                       </TableCell>
                       <TableCell>

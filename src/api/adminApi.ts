@@ -158,6 +158,7 @@ export async function editUserProfile(
 }
 
 export async function setUserUpgraded(userId: string, adminId: string, upgraded: boolean) {
+  let success = false;
   try {
     const client = ensureSupabase();
     const update: Record<string, any> = { is_upgraded: upgraded };
@@ -170,6 +171,7 @@ export async function setUserUpgraded(userId: string, adminId: string, upgraded:
     }
     const { error } = await client.from("profiles").update(update).eq("id", userId);
     if (error) throw error;
+    success = true;
   } catch (err) {
     console.warn("setUserUpgraded: supabase update failed, applying locally:", err);
   }
@@ -181,6 +183,10 @@ export async function setUserUpgraded(userId: string, adminId: string, upgraded:
 
   audit({ adminId, action: upgraded ? "grant_upgrade" : "revoke_upgrade", targetType: "user", targetId: userId });
   publish("users:changed");
+
+  if (!success) {
+    throw new Error("Failed to persist upgrade state to Supabase");
+  }
 }
 
 export async function listUpgradedUsers() {
