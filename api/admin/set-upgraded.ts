@@ -75,7 +75,7 @@ export default async function handler(
 
     const adminUserId = userData.user.id;
     console.log("set-upgraded: checking admin role for", adminUserId);
-    
+
     const { data: roleRow, error: roleError } = await supabase
       .from("user_roles")
       .select("role")
@@ -92,7 +92,20 @@ export default async function handler(
       return res.status(403).json({ error: "Unauthorized: No valid role" });
     }
 
-    if (roleRow.role !== "owner") {
+    const normalizedRole = (role: string | null | undefined) => {
+      switch ((role ?? "").toLowerCase()) {
+        case "owner":
+        case "superadmin":
+          return "owner";
+        case "member":
+        case "admin":
+          return "member";
+        default:
+          return "user";
+      }
+    };
+
+    if (normalizedRole(roleRow.role) !== "owner") {
       console.warn("set-upgraded: user is not owner, role is:", roleRow.role);
       return res.status(403).json({ error: `Unauthorized: User role is ${roleRow.role}, only owner can perform this action` });
     }
