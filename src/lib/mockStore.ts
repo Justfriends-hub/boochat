@@ -102,6 +102,11 @@ export type Channel = {
   onlyAdminsPost: boolean;
   createdAt: number;
   visibility?: Visibility;
+  discussionChatId?: string | null;
+  autoTranslateEnabled?: boolean;
+  allowDirectMessages?: boolean;
+  inviteLink?: string | null;
+  communityId?: string | null;
   joinRequests?: JoinRequest[];
 };
 export type ChannelPost = {

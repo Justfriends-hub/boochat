@@ -17,9 +17,14 @@ function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
     ownerId: row.owner_id,
     adminIds,
     memberIds: members,
-    onlyAdminsPost: true, // Default behavior
+    onlyAdminsPost: row.only_admins_post ?? true,
     createdAt: new Date(row.created_at).getTime(),
     visibility,
+    discussionChatId: row.discussion_chat_id ?? null,
+    autoTranslateEnabled: row.auto_translate_enabled ?? false,
+    allowDirectMessages: row.allow_direct_messages ?? false,
+    inviteLink: row.invite_link ?? null,
+    communityId: row.community_id ?? null,
   };
 }
 
@@ -213,6 +218,9 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
   if (updates.avatar !== undefined) {
     updateData.avatar_url = updates.avatar;
   }
+  if (updates.visibility !== undefined) {
+    updateData.visibility = updates.visibility;
+  }
 
   if (Object.keys(updateData).length > 0) {
     const { error } = await supabase
@@ -248,6 +256,41 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
 
   publish("channels:changed");
 }
+
+export type ChannelAdmin = {
+  userId: string;
+  email: string;
+  displayName: string;
+  avatar: string;
+  isAdmin: boolean;
+  joinedAt?: number;
+};
+
+export type ChannelSubscriber = {
+  userId: string;
+  email: string;
+  displayName: string;
+  avatar: string;
+  isAdmin: boolean;
+  joinedAt?: number;
+};
+
+export type ChannelRemovedMember = {
+  userId: string;
+  removedBy: string | null;
+  reason: string | null;
+  removedAt: number;
+  email?: string;
+  displayName?: string;
+  avatar?: string;
+};
+
+export type ChannelStatistics = {
+  views: number;
+  likes: number;
+  subscribers: number;
+  growth: Array<{ date: string; members: number }>;
+};
 
 export async function addChannelAdmin(channelId: string, userId: string) {
   const supabase = ensureSupabase();
@@ -288,6 +331,382 @@ export async function removeChannelAdmin(channelId: string, userId: string) {
     if (ch) {
       ch.adminIds = ch.adminIds.filter((id) => id !== userId);
     }
+  });
+  publish("channels:changed");
+}
+
+export async function updateChannelType(channelId: string, visibility: "public" | "private") {
+  const supabase = ensureSupabase();
+  const { error } = await supabase
+    .from("channels")
+    .update({ visibility })
+    .eq("id", channelId);
+  if (error) throw error;
+
+  setState((s) => {
+    const channel = s.channels.find((c) => c.id === channelId);
+    if (channel) channel.visibility = visibility;
+  });
+  publish("channels:changed");
+}
+
+export async function updateChannelSettings(channelId: string, settings: { autoTranslateEnabled?: boolean; allowDirectMessages?: boolean }) {
+  const supabase = ensureSupabase();
+  const updateData: any = {};
+  if (settings.autoTranslateEnabled !== undefined) updateData.auto_translate_enabled = settings.autoTranslateEnabled;
+  if (settings.allowDirectMessages !== undefined) updateData.allow_direct_messages = settings.allowDirectMessages;
+
+  if (Object.keys(updateData).length > 0) {
+    const { error } = await supabase
+      .from("channels")
+      .update(updateData)
+      .eq("id", channelId);
+    if (error) throw error;
+  }
+
+  setState((s) => {
+    const channel = s.channels.find((c) => c.id === channelId);
+    if (!channel) return;
+    if (settings.autoTranslateEnabled !== undefined) channel.autoTranslateEnabled = settings.autoTranslateEnabled;
+    if (settings.allowDirectMessages !== undefined) channel.allowDirectMessages = settings.allowDirectMessages;
+  });
+  publish("channels:changed");
+}
+
+export async function setChannelDiscussion(channelId: string, discussionChatId: string | null) {
+  const supabase = ensureSupabase();
+  const { error } = await supabase
+    .from("channels")
+    .update({ discussion_chat_id: discussionChatId })
+    .eq("id", channelId);
+  if (error) throw error;
+
+  setState((s) => {
+    const channel = s.channels.find((c) => c.id === channelId);
+    if (channel) channel.discussionChatId = discussionChatId;
+  });
+  publish("channels:changed");
+}
+
+export async function getChannelAdmins(channelId: string): Promise<ChannelAdmin[]> {
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("channel_members")
+      .select("user_id,is_admin,joined_at,profiles(id,email,display_name,avatar_url)")
+      .eq("channel_id", channelId)
+      .order("joined_at", { ascending: false });
+    if (!error && data) {
+      return (data as any).map((row: any) => ({
+        userId: row.user_id,
+        email: row.profiles?.email ?? "",
+        displayName: row.profiles?.display_name ?? row.user_id,
+        avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles.email ?? row.user_id)}`) : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles?.email ?? row.user_id)}`,
+        isAdmin: row.is_admin,
+        joinedAt: row.joined_at ? new Date(row.joined_at).getTime() : undefined,
+      }));
+    }
+  } catch (err) {
+    console.warn("getChannelAdmins: failed fetching admins, fallback local:", err);
+  }
+
+  const channel = getState().channels.find((c) => c.id === channelId);
+  const adminIds = channel?.adminIds ?? [];
+  return getState().users
+    .filter((user) => adminIds.includes(user.id))
+    .map((user) => ({
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      avatar: user.avatar,
+      isAdmin: true,
+    }));
+}
+
+export async function promoteToChannelAdmin(channelId: string, userId: string) {
+  return addChannelAdmin(channelId, userId);
+}
+
+export async function demoteChannelAdmin(channelId: string, userId: string) {
+  return removeChannelAdmin(channelId, userId);
+}
+
+export async function getChannelSubscribers(channelId: string, options: { search?: string; cursor?: number } = {}) {
+  const pageSize = 20;
+  const start = options.cursor ?? 0;
+  try {
+    const supabase = ensureSupabase();
+    let query = supabase
+      .from("channel_members")
+      .select("user_id,is_admin,joined_at,profiles(id,email,display_name,avatar_url)", { count: "exact" })
+      .eq("channel_id", channelId)
+      .order("joined_at", { ascending: false })
+      .range(start, start + pageSize - 1);
+
+    if (options.search) {
+      const term = `%${options.search.replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+      query = query.or(`profiles.display_name.ilike.${term},profiles.email.ilike.${term}`);
+    }
+
+    const { data, error, count } = await query;
+    if (!error && data) {
+      const rows = data as any[];
+      return {
+        subscribers: rows.map((row) => ({
+          userId: row.user_id,
+          email: row.profiles?.email ?? "",
+          displayName: row.profiles?.display_name ?? row.user_id,
+          avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles.email ?? row.user_id)}`) : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles?.email ?? row.user_id)}`,
+          isAdmin: row.is_admin,
+          joinedAt: row.joined_at ? new Date(row.joined_at).getTime() : undefined,
+        })),
+        nextCursor: rows.length === pageSize ? start + pageSize : null,
+        total: count ?? null,
+      };
+    }
+  } catch (err) {
+    console.warn("getChannelSubscribers: failed fetching from supabase, falling back local:", err);
+  }
+
+  const channel = getState().channels.find((c) => c.id === channelId);
+  const members = channel?.memberIds ?? [];
+  const matched = getState().users.filter((user) => members.includes(user.id) && (!options.search || user.displayName.toLowerCase().includes(options.search.toLowerCase()) || user.email.toLowerCase().includes(options.search.toLowerCase())));
+  return {
+    subscribers: matched.slice(start, start + pageSize).map((user) => ({
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      avatar: user.avatar,
+      isAdmin: channel?.adminIds.includes(user.id) ?? false,
+      joinedAt: undefined,
+    })),
+    nextCursor: matched.length > start + pageSize ? start + pageSize : null,
+    total: matched.length,
+  };
+}
+
+export async function getChannelStatistics(channelId: string): Promise<ChannelStatistics> {
+  try {
+    const supabase = ensureSupabase();
+    const { data: posts, error: postsError } = await supabase
+      .from("channel_posts")
+      .select("id,view_count")
+      .eq("channel_id", channelId);
+
+    const postIds = (posts ?? []).map((p: any) => p.id);
+    const views = (posts ?? []).reduce((sum: number, p: any) => sum + (Number(p.view_count) || 0), 0);
+
+    let likes = 0;
+    if (postIds.length > 0) {
+      const { count, error: likeError } = await supabase
+        .from("channel_post_reactions")
+        .select("id", { count: "exact", head: true })
+        .in("post_id", postIds);
+      if (likeError) throw likeError;
+      likes = count ?? 0;
+    }
+
+    const { data: members, error: memberError } = await supabase
+      .from("channel_members")
+      .select("joined_at")
+      .eq("channel_id", channelId)
+      .order("joined_at", { ascending: true });
+    if (memberError) throw memberError;
+
+    const growthMap = new Map<string, number>();
+    (members ?? []).forEach((row: any) => {
+      const date = new Date(row.joined_at).toISOString().slice(0, 10);
+      growthMap.set(date, (growthMap.get(date) ?? 0) + 1);
+    });
+
+    const growth = Array.from(growthMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, membersCount]) => ({ date, members: membersCount }));
+
+    return {
+      views,
+      likes,
+      subscribers: (members ?? []).length,
+      growth,
+    };
+  } catch (err) {
+    console.warn("getChannelStatistics: failed, falling back to local estimates:", err);
+    const channel = getState().channels.find((c) => c.id === channelId);
+    return {
+      views: 0,
+      likes: 0,
+      subscribers: channel?.memberIds.length ?? 0,
+      growth: [],
+    };
+  }
+}
+
+export async function removeChannelMember(channelId: string, userId: string, reason: string | null, removedBy: string | null = null) {
+  const supabase = ensureSupabase();
+  const removedAt = new Date().toISOString();
+  try {
+    const { error } = await supabase.from("removed_channel_members").insert([
+      { channel_id: channelId, user_id: userId, removed_by: removedBy, reason, removed_at: removedAt },
+    ]);
+    if (error) throw error;
+
+    const { error: deleteError } = await supabase
+      .from("channel_members")
+      .delete()
+      .eq("channel_id", channelId)
+      .eq("user_id", userId);
+    if (deleteError) throw deleteError;
+  } catch (err) {
+    console.warn("removeChannelMember: failed, applying locally where possible:", err);
+  }
+
+  setState((s) => {
+    const channel = s.channels.find((c) => c.id === channelId);
+    if (!channel) return;
+    channel.memberIds = channel.memberIds.filter((id) => id !== userId);
+  });
+  publish("channels:changed");
+}
+
+export async function getRemovedMembers(channelId: string): Promise<ChannelRemovedMember[]> {
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("removed_channel_members")
+      .select("user_id,removed_by,reason,removed_at,profiles(id,email,display_name,avatar_url)")
+      .eq("channel_id", channelId)
+      .order("removed_at", { ascending: false });
+
+    if (!error && data) {
+      return (data as any).map((row: any) => ({
+        userId: row.user_id,
+        removedBy: row.removed_by ?? null,
+        reason: row.reason ?? null,
+        removedAt: new Date(row.removed_at).getTime(),
+        email: row.profiles?.email,
+        displayName: row.profiles?.display_name,
+        avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles.email ?? row.user_id)}`) : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles?.email ?? row.user_id)}`,
+      }));
+    }
+  } catch (err) {
+    console.warn("getRemovedMembers: failed to fetch removed members, fallback local:", err);
+  }
+
+  return [];
+}
+
+export async function unbanChannelMember(channelId: string, userId: string) {
+  const supabase = ensureSupabase();
+  const { error } = await supabase
+    .from("removed_channel_members")
+    .delete()
+    .eq("channel_id", channelId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function getChannelRecentActions(channelId: string) {
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("audit_logs")
+      .select("id,admin_id,action,target_type,target_id,meta,created_at")
+      .eq("target_type", "channel")
+      .eq("target_id", channelId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (!error && data) {
+      return (data as any).map((row: any) => ({
+        id: row.id,
+        adminId: row.admin_id,
+        action: row.action,
+        targetType: row.target_type,
+        targetId: row.target_id,
+        meta: row.meta,
+        createdAt: new Date(row.created_at).getTime(),
+      }));
+    }
+  } catch (err) {
+    console.warn("getChannelRecentActions: failed, fallback local:", err);
+  }
+  return [];
+}
+
+export async function deleteChannel(channelId: string) {
+  const supabase = ensureSupabase();
+  try {
+    const { data: postRows, error: postFetchError } = await supabase
+      .from("channel_posts")
+      .select("id")
+      .eq("channel_id", channelId);
+    if (postFetchError) throw postFetchError;
+
+    const postIds = (postRows ?? []).map((row: any) => row.id);
+    if (postIds.length > 0) {
+      const { error: reactionError } = await supabase
+        .from("channel_post_reactions")
+        .delete()
+        .in("post_id", postIds);
+      if (reactionError) throw reactionError;
+    }
+
+    const { error: postsError } = await supabase
+      .from("channel_posts")
+      .delete()
+      .eq("channel_id", channelId);
+    if (postsError) throw postsError;
+
+    const { error: membersError } = await supabase
+      .from("channel_members")
+      .delete()
+      .eq("channel_id", channelId);
+    if (membersError) throw membersError;
+
+    const { error: removedError } = await supabase
+      .from("removed_channel_members")
+      .delete()
+      .eq("channel_id", channelId);
+    if (removedError) throw removedError;
+
+    const { error: joinError } = await supabase
+      .from("join_requests")
+      .delete()
+      .eq("channel_id", channelId);
+    if (joinError) throw joinError;
+
+    const { error: communityError } = await supabase
+      .from("channel_communities")
+      .delete()
+      .eq("channel_id", channelId);
+    if (communityError) throw communityError;
+
+    const { error: channelError } = await supabase
+      .from("channels")
+      .delete()
+      .eq("id", channelId);
+    if (channelError) throw channelError;
+
+    setState((s) => {
+      s.channels = s.channels.filter((c) => c.id !== channelId);
+    });
+    publish("channels:changed");
+  } catch (err) {
+    console.error("Failed to delete channel:", err);
+    throw err;
+  }
+}
+
+export async function addChannelToCommunity(channelId: string, communityId: string) {
+  const supabase = ensureSupabase();
+  const { error } = await supabase
+    .from("channel_communities")
+    .insert([{ channel_id: channelId, community_id: communityId }]);
+  if (error) throw error;
+
+  setState((s) => {
+    const channel = s.channels.find((c) => c.id === channelId);
+    if (channel) channel.communityId = communityId;
   });
   publish("channels:changed");
 }

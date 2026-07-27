@@ -1,7 +1,7 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
@@ -264,6 +264,16 @@ function ChannelPage() {
           </div>
           <p className="truncate text-xs text-muted-foreground">{channel?.memberIds.length} subscribers</p>
         </div>
+        {(isOwner || isAdmin) && (
+          <Link
+            to="/channels/$channelId/settings"
+            params={{ channelId }}
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:border-primary/70 hover:text-foreground"
+          >
+            <Settings className="h-4 w-4" />
+            Settings
+          </Link>
+        )}
         <Button
           size="icon"
           variant="ghost"

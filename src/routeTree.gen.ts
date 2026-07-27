@@ -26,6 +26,7 @@ import { Route as AppChatsChatIdRouteImport } from './routes/_app.chats.$chatId'
 import { Route as AppGroupsGroupIdRouteImport } from './routes/_app.groups.$groupId'
 import { Route as ExploreChannelChannelIdRouteImport } from './routes/explore/channel.$channelId'
 import { Route as ExploreGroupGroupIdRouteImport } from './routes/explore/group.$groupId'
+import { Route as AppChannelsChannelIdSettingsRouteImport } from './routes/_app.channels.$channelId.settings'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -111,6 +112,12 @@ const ExploreGroupGroupIdRoute = ExploreGroupGroupIdRouteImport.update({
   path: '/explore/group/$groupId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppChannelsChannelIdSettingsRoute =
+  AppChannelsChannelIdSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AppChannelsChannelIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -124,11 +131,12 @@ export interface FileRoutesByFullPath {
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
   '/join/$inviteCode': typeof JoinInviteCodeRoute
-  '/channels/$channelId': typeof AppChannelsChannelIdRoute
+  '/channels/$channelId': typeof AppChannelsChannelIdRouteWithChildren
   '/chats/$chatId': typeof AppChatsChatIdRoute
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
   '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
   '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
+  '/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -142,11 +150,12 @@ export interface FileRoutesByTo {
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
   '/join/$inviteCode': typeof JoinInviteCodeRoute
-  '/channels/$channelId': typeof AppChannelsChannelIdRoute
+  '/channels/$channelId': typeof AppChannelsChannelIdRouteWithChildren
   '/chats/$chatId': typeof AppChatsChatIdRoute
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
   '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
   '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
+  '/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -162,11 +171,12 @@ export interface FileRoutesById {
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
   '/join/$inviteCode': typeof JoinInviteCodeRoute
-  '/_app/channels/$channelId': typeof AppChannelsChannelIdRoute
+  '/_app/channels/$channelId': typeof AppChannelsChannelIdRouteWithChildren
   '/_app/chats/$chatId': typeof AppChatsChatIdRoute
   '/_app/groups/$groupId': typeof AppGroupsGroupIdRoute
   '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
   '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
+  '/_app/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/groups/$groupId'
     | '/explore/channel/$channelId'
     | '/explore/group/$groupId'
+    | '/channels/$channelId/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -205,6 +216,7 @@ export interface FileRouteTypes {
     | '/groups/$groupId'
     | '/explore/channel/$channelId'
     | '/explore/group/$groupId'
+    | '/channels/$channelId/settings'
   id:
     | '__root__'
     | '/'
@@ -224,6 +236,7 @@ export interface FileRouteTypes {
     | '/_app/groups/$groupId'
     | '/explore/channel/$channelId'
     | '/explore/group/$groupId'
+    | '/_app/channels/$channelId/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -357,15 +370,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExploreGroupGroupIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/channels/$channelId/settings': {
+      id: '/_app/channels/$channelId/settings'
+      path: '/settings'
+      fullPath: '/channels/$channelId/settings'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsRouteImport
+      parentRoute: typeof AppChannelsChannelIdRoute
+    }
   }
 }
 
+interface AppChannelsChannelIdRouteChildren {
+  AppChannelsChannelIdSettingsRoute: typeof AppChannelsChannelIdSettingsRoute
+}
+
+const AppChannelsChannelIdRouteChildren: AppChannelsChannelIdRouteChildren = {
+  AppChannelsChannelIdSettingsRoute: AppChannelsChannelIdSettingsRoute,
+}
+
+const AppChannelsChannelIdRouteWithChildren =
+  AppChannelsChannelIdRoute._addFileChildren(AppChannelsChannelIdRouteChildren)
+
 interface AppChannelsRouteChildren {
-  AppChannelsChannelIdRoute: typeof AppChannelsChannelIdRoute
+  AppChannelsChannelIdRoute: typeof AppChannelsChannelIdRouteWithChildren
 }
 
 const AppChannelsRouteChildren: AppChannelsRouteChildren = {
-  AppChannelsChannelIdRoute: AppChannelsChannelIdRoute,
+  AppChannelsChannelIdRoute: AppChannelsChannelIdRouteWithChildren,
 }
 
 const AppChannelsRouteWithChildren = AppChannelsRoute._addFileChildren(
