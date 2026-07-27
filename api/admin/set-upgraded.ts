@@ -1,10 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
+console.log("set-upgraded handler loaded");
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse,
 ) {
+  console.log("set-upgraded handler invoked, method:", req.method);
+  
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -17,20 +21,28 @@ export default async function handler(
     return res.status(400).json({ error: "upgraded is required and must be a boolean" });
   }
 
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("Missing Supabase server environment variables. SUPABASE_URL:", !!process.env.SUPABASE_URL, "SUPABASE_SERVICE_ROLE_KEY:", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+  console.log("set-upgraded: checking environment variables");
+  const hasUrl = !!process.env.SUPABASE_URL;
+  const hasKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+  console.log("SUPABASE_URL:", hasUrl, "SUPABASE_SERVICE_ROLE_KEY:", hasKey);
+  
+  if (!hasUrl || !hasKey) {
+    console.error("Missing Supabase server environment variables");
     return res.status(500).json({ error: "Server misconfigured: Missing Supabase credentials" });
   }
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
+    console.warn("set-upgraded: missing or invalid auth header");
     return res.status(401).json({ error: "Not authenticated" });
   }
 
   const token = authHeader.slice(7);
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-
+  
+  console.log("set-upgraded: creating Supabase client");
   try {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
     console.log("set-upgraded: verifying token for user");
     const { data: userData, error: userError } = await supabase.auth.getUser(token);
     if (userError || !userData?.user) {
