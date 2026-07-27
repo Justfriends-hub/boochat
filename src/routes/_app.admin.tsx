@@ -168,7 +168,8 @@ function AdminPage() {
     );
     try {
       await setUserUpgraded(userId, me.id, upgraded);
-      // On success, keep the optimistic update and just refresh the admin upgraded list
+      // On success, refetch both to ensure server state is in sync
+      qc.invalidateQueries({ queryKey: ["users"] });
       qc.invalidateQueries({ queryKey: ["admin.upgraded"] });
     } catch (err) {
       console.warn("Upgrade toggle failed:", err);
