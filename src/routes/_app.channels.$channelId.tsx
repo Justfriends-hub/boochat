@@ -268,8 +268,9 @@ function ChannelPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => router.navigate({ to: "/channels/$channelId/settings", params: { channelId } })}
+            onClick={() => router.navigate({ to: `/channels/${channelId}/settings` })}
             className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm"
+            aria-label="Channel settings"
           >
             <Settings className="h-4 w-4" />
             Settings
