@@ -265,14 +265,15 @@ function ChannelPage() {
           <p className="truncate text-xs text-muted-foreground">{channel?.memberIds.length} subscribers</p>
         </div>
         {(isOwner || isAdmin) && (
-          <Link
-            to="/channels/$channelId/settings"
-            params={{ channelId }}
-            className="inline-flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:border-primary/70 hover:text-foreground"
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.navigate({ to: "/channels/$channelId/settings", params: { channelId } })}
+            className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm"
           >
             <Settings className="h-4 w-4" />
             Settings
-          </Link>
+          </Button>
         )}
         <Button
           size="icon"
