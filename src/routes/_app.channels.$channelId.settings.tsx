@@ -28,6 +28,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import SettingsGroup from "@/components/settings/SettingsGroup";
+import SettingsRow from "@/components/settings/SettingsRow";
 import {
   addChannelToCommunity,
   deleteChannel,
@@ -334,6 +336,59 @@ function ChannelSettingsPage() {
               </CardFooter>
             </Card>
 
+            <SettingsGroup>
+              <Link to={`/channels/${channelId}/settings/channel-type`} className="no-underline">
+                <SettingsRow
+                  icon={Zap}
+                  iconBg="bg-blue-500"
+                  label="Channel type"
+                  value={channel.visibility}
+                />
+              </Link>
+
+              <Link to={`/channels/${channelId}/settings/discussion`} className="no-underline">
+                <SettingsRow
+                  icon={MessageCircle}
+                  iconBg="bg-green-500"
+                  label="Discussion"
+                  value={channel.discussionChatId ? "Linked" : "Add"}
+                />
+              </Link>
+
+              <Link to={`/channels/${channelId}/settings/statistics`} className="no-underline">
+                <SettingsRow
+                  icon={ShieldCheck}
+                  iconBg="bg-rose-500"
+                  label="Reactions"
+                  value={`${stats?.likes ?? 0}`}
+                />
+              </Link>
+
+              <Link to={`/channels/${channelId}/settings/appearance`} className="no-underline">
+                <SettingsRow
+                  icon={Settings}
+                  iconBg="bg-orange-500"
+                  label="Appearance"
+                />
+              </Link>
+
+              <SettingsRow
+                icon={Lock}
+                iconBg="bg-purple-500"
+                label="Auto-translate messages"
+                toggle={{ checked: !!channel.autoTranslateEnabled, onChange: () => handleToggleAutoTranslate(), disabled: !canManage }}
+              />
+
+              <Link to={`/channels/${channelId}/settings/direct-messages`} className="no-underline">
+                <SettingsRow
+                  icon={MessageCircle}
+                  iconBg="bg-indigo-500"
+                  label="Direct messages"
+                  value={channel.allowDirectMessages ? "On" : "Off"}
+                />
+              </Link>
+            </SettingsGroup>
+
             <Card>
               <CardHeader>
                 <CardTitle>Core settings</CardTitle>
@@ -462,14 +517,14 @@ function ChannelSettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Administrators</CardTitle>
-                <CardDescription>Grant or revoke channel admin access.</CardDescription>
+                <CardDescription>Grant or revoke channel admin access. <Link to={`/channels/${channelId}/settings/administrators`} className="ml-2 text-sm">Manage</Link></CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {admins.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No admins yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {admins.map((admin) => (
+                    {admins.slice(0,3).map((admin) => (
                       <div key={admin.userId} className="flex items-center gap-3 rounded-xl border p-3">
                         <UserAvatar name={admin.displayName} src={admin.avatar} size={32} />
                         <div className="min-w-0 flex-1">
@@ -487,6 +542,7 @@ function ChannelSettingsPage() {
                         )}
                       </div>
                     ))}
+                    {admins.length > 3 ? <Link to={`/channels/${channelId}/settings/administrators`} className="text-sm">View all</Link> : null}
                   </div>
                 )}
               </CardContent>
@@ -495,7 +551,7 @@ function ChannelSettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Subscribers</CardTitle>
-                <CardDescription>Search members and review who can see channel posts.</CardDescription>
+                <CardDescription>Search members and review who can see channel posts. <Link to={`/channels/${channelId}/settings/subscribers`} className="ml-2 text-sm">Manage</Link></CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <Input
@@ -507,7 +563,7 @@ function ChannelSettingsPage() {
                   {subscriberList.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No subscribers found.</p>
                   ) : (
-                    subscriberList.map((subscriber) => (
+                    subscriberList.slice(0,4).map((subscriber) => (
                       <div key={subscriber.userId} className="flex items-center gap-3 rounded-xl border p-3">
                         <UserAvatar name={subscriber.displayName} src={subscriber.avatar} size={32} />
                         <div className="min-w-0 flex-1">

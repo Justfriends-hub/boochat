@@ -27,6 +27,16 @@ import { Route as AppGroupsGroupIdRouteImport } from './routes/_app.groups.$grou
 import { Route as ExploreChannelChannelIdRouteImport } from './routes/explore/channel.$channelId'
 import { Route as ExploreGroupGroupIdRouteImport } from './routes/explore/group.$groupId'
 import { Route as AppChannelsChannelIdSettingsRouteImport } from './routes/_app.channels.$channelId.settings'
+import { Route as AppChannelsChannelIdSettingsAdministratorsRouteImport } from './routes/_app.channels.$channelId.settings.administrators'
+import { Route as AppChannelsChannelIdSettingsAppearanceRouteImport } from './routes/_app.channels.$channelId.settings.appearance'
+import { Route as AppChannelsChannelIdSettingsChannelTypeRouteImport } from './routes/_app.channels.$channelId.settings.channel-type'
+import { Route as AppChannelsChannelIdSettingsCommunitiesRouteImport } from './routes/_app.channels.$channelId.settings.communities'
+import { Route as AppChannelsChannelIdSettingsDirectMessagesRouteImport } from './routes/_app.channels.$channelId.settings.direct-messages'
+import { Route as AppChannelsChannelIdSettingsDiscussionRouteImport } from './routes/_app.channels.$channelId.settings.discussion'
+import { Route as AppChannelsChannelIdSettingsRecentActionsRouteImport } from './routes/_app.channels.$channelId.settings.recent-actions'
+import { Route as AppChannelsChannelIdSettingsRemovedMembersRouteImport } from './routes/_app.channels.$channelId.settings.removed-members'
+import { Route as AppChannelsChannelIdSettingsStatisticsRouteImport } from './routes/_app.channels.$channelId.settings.statistics'
+import { Route as AppChannelsChannelIdSettingsSubscribersRouteImport } from './routes/_app.channels.$channelId.settings.subscribers'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -118,6 +128,66 @@ const AppChannelsChannelIdSettingsRoute =
     path: '/settings',
     getParentRoute: () => AppChannelsChannelIdRoute,
   } as any)
+const AppChannelsChannelIdSettingsAdministratorsRoute =
+  AppChannelsChannelIdSettingsAdministratorsRouteImport.update({
+    id: '/administrators',
+    path: '/administrators',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsAppearanceRoute =
+  AppChannelsChannelIdSettingsAppearanceRouteImport.update({
+    id: '/appearance',
+    path: '/appearance',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsChannelTypeRoute =
+  AppChannelsChannelIdSettingsChannelTypeRouteImport.update({
+    id: '/channel-type',
+    path: '/channel-type',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsCommunitiesRoute =
+  AppChannelsChannelIdSettingsCommunitiesRouteImport.update({
+    id: '/communities',
+    path: '/communities',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsDirectMessagesRoute =
+  AppChannelsChannelIdSettingsDirectMessagesRouteImport.update({
+    id: '/direct-messages',
+    path: '/direct-messages',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsDiscussionRoute =
+  AppChannelsChannelIdSettingsDiscussionRouteImport.update({
+    id: '/discussion',
+    path: '/discussion',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsRecentActionsRoute =
+  AppChannelsChannelIdSettingsRecentActionsRouteImport.update({
+    id: '/recent-actions',
+    path: '/recent-actions',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsRemovedMembersRoute =
+  AppChannelsChannelIdSettingsRemovedMembersRouteImport.update({
+    id: '/removed-members',
+    path: '/removed-members',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsStatisticsRoute =
+  AppChannelsChannelIdSettingsStatisticsRouteImport.update({
+    id: '/statistics',
+    path: '/statistics',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
+const AppChannelsChannelIdSettingsSubscribersRoute =
+  AppChannelsChannelIdSettingsSubscribersRouteImport.update({
+    id: '/subscribers',
+    path: '/subscribers',
+    getParentRoute: () => AppChannelsChannelIdSettingsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -136,7 +206,17 @@ export interface FileRoutesByFullPath {
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
   '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
   '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
-  '/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRoute
+  '/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRouteWithChildren
+  '/channels/$channelId/settings/administrators': typeof AppChannelsChannelIdSettingsAdministratorsRoute
+  '/channels/$channelId/settings/appearance': typeof AppChannelsChannelIdSettingsAppearanceRoute
+  '/channels/$channelId/settings/channel-type': typeof AppChannelsChannelIdSettingsChannelTypeRoute
+  '/channels/$channelId/settings/communities': typeof AppChannelsChannelIdSettingsCommunitiesRoute
+  '/channels/$channelId/settings/direct-messages': typeof AppChannelsChannelIdSettingsDirectMessagesRoute
+  '/channels/$channelId/settings/discussion': typeof AppChannelsChannelIdSettingsDiscussionRoute
+  '/channels/$channelId/settings/recent-actions': typeof AppChannelsChannelIdSettingsRecentActionsRoute
+  '/channels/$channelId/settings/removed-members': typeof AppChannelsChannelIdSettingsRemovedMembersRoute
+  '/channels/$channelId/settings/statistics': typeof AppChannelsChannelIdSettingsStatisticsRoute
+  '/channels/$channelId/settings/subscribers': typeof AppChannelsChannelIdSettingsSubscribersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -155,7 +235,17 @@ export interface FileRoutesByTo {
   '/groups/$groupId': typeof AppGroupsGroupIdRoute
   '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
   '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
-  '/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRoute
+  '/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRouteWithChildren
+  '/channels/$channelId/settings/administrators': typeof AppChannelsChannelIdSettingsAdministratorsRoute
+  '/channels/$channelId/settings/appearance': typeof AppChannelsChannelIdSettingsAppearanceRoute
+  '/channels/$channelId/settings/channel-type': typeof AppChannelsChannelIdSettingsChannelTypeRoute
+  '/channels/$channelId/settings/communities': typeof AppChannelsChannelIdSettingsCommunitiesRoute
+  '/channels/$channelId/settings/direct-messages': typeof AppChannelsChannelIdSettingsDirectMessagesRoute
+  '/channels/$channelId/settings/discussion': typeof AppChannelsChannelIdSettingsDiscussionRoute
+  '/channels/$channelId/settings/recent-actions': typeof AppChannelsChannelIdSettingsRecentActionsRoute
+  '/channels/$channelId/settings/removed-members': typeof AppChannelsChannelIdSettingsRemovedMembersRoute
+  '/channels/$channelId/settings/statistics': typeof AppChannelsChannelIdSettingsStatisticsRoute
+  '/channels/$channelId/settings/subscribers': typeof AppChannelsChannelIdSettingsSubscribersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -176,7 +266,17 @@ export interface FileRoutesById {
   '/_app/groups/$groupId': typeof AppGroupsGroupIdRoute
   '/explore/channel/$channelId': typeof ExploreChannelChannelIdRoute
   '/explore/group/$groupId': typeof ExploreGroupGroupIdRoute
-  '/_app/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRoute
+  '/_app/channels/$channelId/settings': typeof AppChannelsChannelIdSettingsRouteWithChildren
+  '/_app/channels/$channelId/settings/administrators': typeof AppChannelsChannelIdSettingsAdministratorsRoute
+  '/_app/channels/$channelId/settings/appearance': typeof AppChannelsChannelIdSettingsAppearanceRoute
+  '/_app/channels/$channelId/settings/channel-type': typeof AppChannelsChannelIdSettingsChannelTypeRoute
+  '/_app/channels/$channelId/settings/communities': typeof AppChannelsChannelIdSettingsCommunitiesRoute
+  '/_app/channels/$channelId/settings/direct-messages': typeof AppChannelsChannelIdSettingsDirectMessagesRoute
+  '/_app/channels/$channelId/settings/discussion': typeof AppChannelsChannelIdSettingsDiscussionRoute
+  '/_app/channels/$channelId/settings/recent-actions': typeof AppChannelsChannelIdSettingsRecentActionsRoute
+  '/_app/channels/$channelId/settings/removed-members': typeof AppChannelsChannelIdSettingsRemovedMembersRoute
+  '/_app/channels/$channelId/settings/statistics': typeof AppChannelsChannelIdSettingsStatisticsRoute
+  '/_app/channels/$channelId/settings/subscribers': typeof AppChannelsChannelIdSettingsSubscribersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -198,6 +298,16 @@ export interface FileRouteTypes {
     | '/explore/channel/$channelId'
     | '/explore/group/$groupId'
     | '/channels/$channelId/settings'
+    | '/channels/$channelId/settings/administrators'
+    | '/channels/$channelId/settings/appearance'
+    | '/channels/$channelId/settings/channel-type'
+    | '/channels/$channelId/settings/communities'
+    | '/channels/$channelId/settings/direct-messages'
+    | '/channels/$channelId/settings/discussion'
+    | '/channels/$channelId/settings/recent-actions'
+    | '/channels/$channelId/settings/removed-members'
+    | '/channels/$channelId/settings/statistics'
+    | '/channels/$channelId/settings/subscribers'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -217,6 +327,16 @@ export interface FileRouteTypes {
     | '/explore/channel/$channelId'
     | '/explore/group/$groupId'
     | '/channels/$channelId/settings'
+    | '/channels/$channelId/settings/administrators'
+    | '/channels/$channelId/settings/appearance'
+    | '/channels/$channelId/settings/channel-type'
+    | '/channels/$channelId/settings/communities'
+    | '/channels/$channelId/settings/direct-messages'
+    | '/channels/$channelId/settings/discussion'
+    | '/channels/$channelId/settings/recent-actions'
+    | '/channels/$channelId/settings/removed-members'
+    | '/channels/$channelId/settings/statistics'
+    | '/channels/$channelId/settings/subscribers'
   id:
     | '__root__'
     | '/'
@@ -237,6 +357,16 @@ export interface FileRouteTypes {
     | '/explore/channel/$channelId'
     | '/explore/group/$groupId'
     | '/_app/channels/$channelId/settings'
+    | '/_app/channels/$channelId/settings/administrators'
+    | '/_app/channels/$channelId/settings/appearance'
+    | '/_app/channels/$channelId/settings/channel-type'
+    | '/_app/channels/$channelId/settings/communities'
+    | '/_app/channels/$channelId/settings/direct-messages'
+    | '/_app/channels/$channelId/settings/discussion'
+    | '/_app/channels/$channelId/settings/recent-actions'
+    | '/_app/channels/$channelId/settings/removed-members'
+    | '/_app/channels/$channelId/settings/statistics'
+    | '/_app/channels/$channelId/settings/subscribers'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -377,15 +507,128 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppChannelsChannelIdSettingsRouteImport
       parentRoute: typeof AppChannelsChannelIdRoute
     }
+    '/_app/channels/$channelId/settings/administrators': {
+      id: '/_app/channels/$channelId/settings/administrators'
+      path: '/administrators'
+      fullPath: '/channels/$channelId/settings/administrators'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsAdministratorsRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/appearance': {
+      id: '/_app/channels/$channelId/settings/appearance'
+      path: '/appearance'
+      fullPath: '/channels/$channelId/settings/appearance'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsAppearanceRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/channel-type': {
+      id: '/_app/channels/$channelId/settings/channel-type'
+      path: '/channel-type'
+      fullPath: '/channels/$channelId/settings/channel-type'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsChannelTypeRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/communities': {
+      id: '/_app/channels/$channelId/settings/communities'
+      path: '/communities'
+      fullPath: '/channels/$channelId/settings/communities'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsCommunitiesRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/direct-messages': {
+      id: '/_app/channels/$channelId/settings/direct-messages'
+      path: '/direct-messages'
+      fullPath: '/channels/$channelId/settings/direct-messages'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsDirectMessagesRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/discussion': {
+      id: '/_app/channels/$channelId/settings/discussion'
+      path: '/discussion'
+      fullPath: '/channels/$channelId/settings/discussion'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsDiscussionRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/recent-actions': {
+      id: '/_app/channels/$channelId/settings/recent-actions'
+      path: '/recent-actions'
+      fullPath: '/channels/$channelId/settings/recent-actions'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsRecentActionsRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/removed-members': {
+      id: '/_app/channels/$channelId/settings/removed-members'
+      path: '/removed-members'
+      fullPath: '/channels/$channelId/settings/removed-members'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsRemovedMembersRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/statistics': {
+      id: '/_app/channels/$channelId/settings/statistics'
+      path: '/statistics'
+      fullPath: '/channels/$channelId/settings/statistics'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsStatisticsRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
+    '/_app/channels/$channelId/settings/subscribers': {
+      id: '/_app/channels/$channelId/settings/subscribers'
+      path: '/subscribers'
+      fullPath: '/channels/$channelId/settings/subscribers'
+      preLoaderRoute: typeof AppChannelsChannelIdSettingsSubscribersRouteImport
+      parentRoute: typeof AppChannelsChannelIdSettingsRoute
+    }
   }
 }
 
+interface AppChannelsChannelIdSettingsRouteChildren {
+  AppChannelsChannelIdSettingsAdministratorsRoute: typeof AppChannelsChannelIdSettingsAdministratorsRoute
+  AppChannelsChannelIdSettingsAppearanceRoute: typeof AppChannelsChannelIdSettingsAppearanceRoute
+  AppChannelsChannelIdSettingsChannelTypeRoute: typeof AppChannelsChannelIdSettingsChannelTypeRoute
+  AppChannelsChannelIdSettingsCommunitiesRoute: typeof AppChannelsChannelIdSettingsCommunitiesRoute
+  AppChannelsChannelIdSettingsDirectMessagesRoute: typeof AppChannelsChannelIdSettingsDirectMessagesRoute
+  AppChannelsChannelIdSettingsDiscussionRoute: typeof AppChannelsChannelIdSettingsDiscussionRoute
+  AppChannelsChannelIdSettingsRecentActionsRoute: typeof AppChannelsChannelIdSettingsRecentActionsRoute
+  AppChannelsChannelIdSettingsRemovedMembersRoute: typeof AppChannelsChannelIdSettingsRemovedMembersRoute
+  AppChannelsChannelIdSettingsStatisticsRoute: typeof AppChannelsChannelIdSettingsStatisticsRoute
+  AppChannelsChannelIdSettingsSubscribersRoute: typeof AppChannelsChannelIdSettingsSubscribersRoute
+}
+
+const AppChannelsChannelIdSettingsRouteChildren: AppChannelsChannelIdSettingsRouteChildren =
+  {
+    AppChannelsChannelIdSettingsAdministratorsRoute:
+      AppChannelsChannelIdSettingsAdministratorsRoute,
+    AppChannelsChannelIdSettingsAppearanceRoute:
+      AppChannelsChannelIdSettingsAppearanceRoute,
+    AppChannelsChannelIdSettingsChannelTypeRoute:
+      AppChannelsChannelIdSettingsChannelTypeRoute,
+    AppChannelsChannelIdSettingsCommunitiesRoute:
+      AppChannelsChannelIdSettingsCommunitiesRoute,
+    AppChannelsChannelIdSettingsDirectMessagesRoute:
+      AppChannelsChannelIdSettingsDirectMessagesRoute,
+    AppChannelsChannelIdSettingsDiscussionRoute:
+      AppChannelsChannelIdSettingsDiscussionRoute,
+    AppChannelsChannelIdSettingsRecentActionsRoute:
+      AppChannelsChannelIdSettingsRecentActionsRoute,
+    AppChannelsChannelIdSettingsRemovedMembersRoute:
+      AppChannelsChannelIdSettingsRemovedMembersRoute,
+    AppChannelsChannelIdSettingsStatisticsRoute:
+      AppChannelsChannelIdSettingsStatisticsRoute,
+    AppChannelsChannelIdSettingsSubscribersRoute:
+      AppChannelsChannelIdSettingsSubscribersRoute,
+  }
+
+const AppChannelsChannelIdSettingsRouteWithChildren =
+  AppChannelsChannelIdSettingsRoute._addFileChildren(
+    AppChannelsChannelIdSettingsRouteChildren,
+  )
+
 interface AppChannelsChannelIdRouteChildren {
-  AppChannelsChannelIdSettingsRoute: typeof AppChannelsChannelIdSettingsRoute
+  AppChannelsChannelIdSettingsRoute: typeof AppChannelsChannelIdSettingsRouteWithChildren
 }
 
 const AppChannelsChannelIdRouteChildren: AppChannelsChannelIdRouteChildren = {
-  AppChannelsChannelIdSettingsRoute: AppChannelsChannelIdSettingsRoute,
+  AppChannelsChannelIdSettingsRoute:
+    AppChannelsChannelIdSettingsRouteWithChildren,
 }
 
 const AppChannelsChannelIdRouteWithChildren =
