@@ -122,7 +122,7 @@ function RouteTracker() {
       if (!isRestorable) return;
       // Only navigate if the current location is still the root/index
       if (window.location.pathname === "/" || window.location.pathname === "") {
-        router.navigate({ to: saved, replace: true }).catch(() => {});
+        router.navigate({ to: saved, replace: false }).catch(() => {});
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps

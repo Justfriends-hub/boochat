@@ -2,6 +2,7 @@ import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanst
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
 import { subscribe } from "@/lib/eventBus";
+import { hasBrowserBackHistory } from "@/lib/utils";
 import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -279,7 +280,17 @@ function ChannelPage() {
   return (
     <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
       <header className="flex h-16 items-center gap-2 border-b bg-card px-3">
-        <Button variant="ghost" size="icon" onClick={() => router.history.back()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            if (hasBrowserBackHistory()) {
+              router.history.back();
+            } else {
+              router.navigate({ to: "/channels", replace: true });
+            }
+          }}
+        >
           <ArrowLeft className="h-5 w-5" />
         </Button>
         {channel && <UserAvatar name={channel.name} src={channel.avatar} size={40} />}

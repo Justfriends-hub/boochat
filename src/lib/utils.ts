@@ -15,3 +15,12 @@ export function getErrorMessage(error: unknown, fallback = "An error occurred.")
   return fallback;
 }
 
+export function hasBrowserBackHistory(): boolean {
+  if (typeof window === "undefined") return false;
+  const state = window.history.state as { idx?: number } | null;
+  if (typeof state?.idx === "number") {
+    return state.idx > 0;
+  }
+  return window.history.length > 1;
+}
+

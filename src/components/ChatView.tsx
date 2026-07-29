@@ -5,7 +5,7 @@ import { subscribe } from "@/lib/eventBus";
 import { ArrowLeft, Search, MoreVertical, X, Link2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, hasBrowserBackHistory } from "@/lib/utils";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -268,7 +268,18 @@ export function ChatView({ chatId }: { chatId: string }) {
     <div className="relative flex flex-1 flex-col h-full min-h-0 overflow-hidden select-none">
       {/* Header - Permanently fixed at top-0 with z-30 so all messages scroll underneath it */}
       <header className="absolute top-0 inset-x-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-card/95 backdrop-blur-md px-3 shadow-xs">
-        <Button variant="ghost" size="icon" onClick={() => router.history.back()} className="md:hidden">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            if (hasBrowserBackHistory()) {
+              router.history.back();
+            } else {
+              router.navigate({ to: "/chats", replace: true });
+            }
+          }}
+          className="md:hidden"
+        >
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <UserAvatar
