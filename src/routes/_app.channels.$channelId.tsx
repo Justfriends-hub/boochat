@@ -1,6 +1,7 @@
 import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
+import { subscribe } from "@/lib/eventBus";
 import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -60,6 +61,20 @@ function ChannelPage() {
     qc.invalidateQueries({ queryKey: ["posts", channelId] });
     qc.invalidateQueries({ queryKey: ["channel", channelId] });
   }), [channelId, qc]);
+  useEffect(() => {
+    const unsub = subscribe("channels:changed", () => {
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      qc.invalidateQueries({ queryKey: ["posts", channelId] });
+    });
+    return unsub;
+  }, [channelId, qc]);
+  useEffect(() => {
+    const unsub = subscribe(`channel:${channelId}`, () => {
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      qc.invalidateQueries({ queryKey: ["posts", channelId] });
+    });
+    return unsub;
+  }, [channelId, qc]);
 
   useEffect(() => {
     posts.forEach((p) => markPostViewed(p.id, sessionId));
@@ -87,6 +102,7 @@ function ChannelPage() {
     if (!channel) return;
     await toggleChannelSubscribe(channel.id, me.id);
     qc.invalidateQueries({ queryKey: ["channel", channelId] });
+    qc.invalidateQueries({ queryKey: ["channels"] });
     toast.success(isSubscribed ? "Unsubscribed from channel" : "Subscribed to channel!");
   };
 
@@ -95,6 +111,7 @@ function ChannelPage() {
     try {
       await requestJoinChannel(channel.id, me.id);
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
       toast.success("Join request sent. The owner/admin can approve it.");
     } catch (err: any) {
       toast.error(err.message || "Failed to request access");
@@ -106,6 +123,7 @@ function ChannelPage() {
     try {
       await approveJoinChannelRequest(channel.id, userId);
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
       toast.success("Request approved.");
     } catch (err: any) {
       toast.error(err.message || "Failed to approve request");
@@ -117,6 +135,7 @@ function ChannelPage() {
     try {
       await rejectJoinChannelRequest(channel.id, userId);
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
       toast.success("Request rejected.");
     } catch (err: any) {
       toast.error(err.message || "Failed to reject request");
@@ -134,6 +153,7 @@ function ChannelPage() {
         toast.success("Channel admin revoked.");
       }
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
     } catch (err: any) {
       toast.error(err.message || "Failed to update channel admin role");
     }
@@ -146,6 +166,7 @@ function ChannelPage() {
     try {
       await updateChannel(channel.id, { visibility: next });
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
       toast.success(`Channel is now ${next}.`);
     } catch (err: any) {
       toast.error(err.message || "Failed to update visibility");
@@ -169,6 +190,8 @@ function ChannelPage() {
         body: postText.trim(),
         image: postImage, // File object — API handles compress+upload
       });
+      qc.invalidateQueries({ queryKey: ["posts", channelId] });
+      qc.invalidateQueries({ queryKey: ["channel", channelId] });
       setPostText("");
       setPostImage(undefined);
       if (postImagePreview) URL.revokeObjectURL(postImagePreview);

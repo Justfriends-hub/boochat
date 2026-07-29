@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
+import { subscribe } from "@/lib/eventBus";
 import { ArrowLeft, Search, MoreVertical, X, Link2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,6 +113,13 @@ export function ChatView({ chatId }: { chatId: string }) {
 
   useEffect(() => {
     const unsub = subscribeToChat(chatId, () => {
+      qc.invalidateQueries({ queryKey: ["messages", chatId] });
+      qc.invalidateQueries({ queryKey: ["chat", chatId] });
+    });
+    return () => { unsub(); };
+  }, [chatId, qc]);
+  useEffect(() => {
+    const unsub = subscribe(`chat:${chatId}`, () => {
       qc.invalidateQueries({ queryKey: ["messages", chatId] });
       qc.invalidateQueries({ queryKey: ["chat", chatId] });
     });

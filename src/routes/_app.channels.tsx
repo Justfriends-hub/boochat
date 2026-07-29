@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Radio, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { subscribe } from "@/lib/eventBus";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -33,6 +34,10 @@ function ChannelsPage() {
 
   const { data: channels = [] } = useQuery({ queryKey: ["channels"], queryFn: listChannels });
   useEffect(() => subscribeToChannels(() => qc.invalidateQueries({ queryKey: ["channels"] })), [qc]);
+  useEffect(() => {
+    const unsub = subscribe("channels:changed", () => qc.invalidateQueries({ queryKey: ["channels"] }));
+    return unsub;
+  }, [qc]);
 
   const isChannelDetailRoute = typeof pathname === "string" && pathname !== "/channels" && pathname.startsWith("/channels/");
 
@@ -57,6 +62,7 @@ function ChannelsPage() {
         ownerId: me.id,
         onlyAdminsPost: true,
       });
+      qc.setQueryData(["channels"], (old: any) => old ? [ch, ...old] : [ch]);
       toast.success("Channel created successfully!");
       setCreateOpen(false);
       setName("");

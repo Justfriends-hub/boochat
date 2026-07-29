@@ -2,6 +2,7 @@ import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tan
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { subscribe } from "@/lib/eventBus";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,6 +47,11 @@ function GroupsPage() {
     const u = subscribeToChats(() => qc.invalidateQueries({ queryKey: ["chats", me.id] }));
     return u;
   }, [me, qc]);
+  useEffect(() => {
+    if (!me) return;
+    const unsub = subscribe("chats:changed", () => qc.invalidateQueries({ queryKey: ["chats", me.id] }));
+    return unsub;
+  }, [me, qc]);
 
   if (!me) {
     return (
@@ -75,6 +81,7 @@ function GroupsPage() {
     setIsCreating(true);
     try {
       const g = await createGroup({ name: name.trim(), memberIds: selected, ownerId: me.id });
+      qc.setQueryData(["chats", me.id], (old: any) => old ? [g, ...old] : [g]);
       setOpen(false);
       setName("");
       setSelected([]);
