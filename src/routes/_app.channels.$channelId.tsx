@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
@@ -34,6 +34,9 @@ function ChannelPage() {
   const me = useAuth()!;
   const qc = useQueryClient();
   const sessionId = useUIStore((s) => s.sessionId);
+  const isSettingsView = useRouterState(
+    (s) => s.location.pathname.includes(`/channels/${channelId}/settings`),
+  );
 
   const [openPost, setOpenPost] = useState<ChannelPost | null>(null);
   const [postText, setPostText] = useState("");
@@ -296,7 +299,9 @@ function ChannelPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {posts.length === 0 ? (
+        {isSettingsView ? (
+          <Outlet />
+        ) : posts.length === 0 ? (
           <EmptyState icon={MessageSquare} title="No posts yet" description="Check back later for updates from channel owner." />
         ) : posts.map((p) => {
           const author = users.find((u) => u.id === p.authorId);
