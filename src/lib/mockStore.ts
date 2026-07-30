@@ -96,6 +96,7 @@ export type Channel = {
   name: string;
   description: string;
   avatar: string;
+  wallpaper?: string;
   ownerId: string;
   adminIds: string[];
   memberIds: string[];

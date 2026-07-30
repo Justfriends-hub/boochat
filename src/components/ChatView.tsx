@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { MessageCircle } from "lucide-react";
 import {
   listMessages, sendMessage, editMessage, deleteMessage, forwardMessage,
-  subscribeToChat, subscribeToTyping, markChatRead,
+  subscribeToChat, subscribeToTyping, markChatRead, trackMessageView, getMessageViewers, subscribeToMessageViews,
 } from "@/api/messagesApi";
 import { listChats, getChat, updateChat, requestJoinGroup, approveJoinGroupRequest, rejectJoinGroupRequest } from "@/api/chatsApi";
 import { listUsers, getUser } from "@/api/usersApi";
@@ -48,6 +48,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [typing, setTyping] = useState<string | null>(null);
   const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [messageViewers, setMessageViewers] = useState<Record<string, string[]>>({});
 
   const { data: chat } = useQuery({
     queryKey: ["chat", chatId],
@@ -136,6 +137,48 @@ export function ChatView({ chatId }: { chatId: string }) {
   useEffect(() => {
     if (me) markChatRead(chatId, me.id);
   }, [chatId, me, messages.length]);
+
+  // Subscribe to message view changes for real-time read receipt updates
+  useEffect(() => {
+    const unsubscribe = subscribeToMessageViews(
+      messages.map((m) => m.id),
+      async () => {
+        // Refresh viewers for all messages in this chat
+        const viewers: Record<string, string[]> = {};
+        for (const msg of messages) {
+          viewers[msg.id] = await getMessageViewers(msg.id);
+        }
+        setMessageViewers(viewers);
+      }
+    );
+    return () => unsubscribe();
+  }, [messages]);
+
+  // Track message views when the component is visible or messages come into view
+  useEffect(() => {
+    if (!me) return;
+    
+    // Intersection Observer to track when messages come into view
+    const observer = new IntersectionObserver(
+      async (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const messageId = (entry.target as HTMLElement).dataset.messageId;
+            if (messageId) {
+              await trackMessageView(messageId, me.id);
+            }
+          }
+        }
+      },
+      { threshold: 0.5 }
+    );
+
+    // Observe all messages in the virtualizer
+    const messageElements = document.querySelectorAll("[data-message-id]");
+    messageElements.forEach((el) => observer.observe(el));
+
+    return () => observer.disconnect();
+  }, [me, messages]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return messages;
@@ -341,6 +384,7 @@ export function ChatView({ chatId }: { chatId: string }) {
                   key={m.id}
                   ref={virtualizer.measureElement}
                   data-index={v.index}
+                  data-message-id={m.id}
                   style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${v.start}px)` }}
                 >
                   {!sameDay && (
@@ -359,6 +403,7 @@ export function ChatView({ chatId }: { chatId: string }) {
                     onEdit={() => { setEditing(m); setEditText(m.body); }}
                     onDelete={() => deleteMessage(m.id)}
                     onForward={() => setForwarding(m)}
+                    isViewedByRecipient={otherUserId ? (messageViewers[m.id] ?? []).includes(otherUserId) : undefined}
                   />
                 </div>
               );

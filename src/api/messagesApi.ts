@@ -15,6 +15,14 @@ import { useSyncStore } from "@/stores/syncStore";
 
 function mapMessage(row: any): Message {
   const createdAt = new Date(row.created_at).getTime();
+  const updatedAt = row.updated_at ? new Date(row.updated_at).getTime() : createdAt;
+
+  // Determine status:
+  // - pending: local optimistic messages use temporary ids and are handled elsewhere
+  // - delivered: message exists on the server but hasn't been read by the recipient
+  // - read: recipient opened the chat and the server RPC updated updated_at
+  const status: Message['status'] = updatedAt > createdAt ? "read" : "delivered";
+
   return {
     id: row.id,
     chatId: row.chat_id,
@@ -28,7 +36,7 @@ function mapMessage(row: any): Message {
     deletedAt: row.deleted_at ? new Date(row.deleted_at).getTime() : undefined,
     replyTo: row.reply_to ?? undefined,
     forwardedFrom: row.forwarded_from ?? undefined,
-    status: "sent",
+    status,
   };
 }
 
@@ -335,4 +343,63 @@ export function subscribeToChat(chatId: string, cb: () => void) {
 
 export function subscribeToTyping(_chatId: string, _cb: (p: { userId: string; typing: boolean }) => void) {
   return () => undefined;
+}
+
+// Track when a user views a message for per-user read receipts
+export async function trackMessageView(messageId: string, userId: string) {
+  if (typeof window !== "undefined" && !navigator.onLine) return;
+  try {
+    const supabase = ensureSupabase();
+    const { error } = await supabase
+      .from("message_views")
+      .upsert({ message_id: messageId, viewer_id: userId, viewed_at: new Date().toISOString() }, {
+        onConflict: "message_id,viewer_id"
+      });
+    if (error) console.warn("trackMessageView error:", error.message);
+  } catch (err) {
+    console.warn("Failed to track message view:", err);
+  }
+}
+
+// Get list of user IDs who have viewed a message
+export async function getMessageViewers(messageId: string): Promise<string[]> {
+  if (typeof window === "undefined") return [];
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("message_views")
+      .select("viewer_id")
+      .eq("message_id", messageId);
+    
+    if (error) {
+      console.warn("getMessageViewers error:", error.message);
+      return [];
+    }
+    return (data ?? []).map((row: any) => row.viewer_id);
+  } catch (err) {
+    console.warn("Failed to fetch message viewers:", err);
+    return [];
+  }
+}
+
+// Subscribe to message_views changes for realtime read receipt updates
+export function subscribeToMessageViews(messageIds: string[], cb: () => void) {
+  if (typeof window === "undefined" || !navigator.onLine) return () => undefined;
+  try {
+    const supabase = ensureSupabase();
+    const channel = supabase.channel("message-views");
+    
+    // Subscribe to all message_views changes
+    channel.on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "message_views" },
+      () => cb(),
+    );
+    
+    channel.subscribe();
+    return () => channel.unsubscribe();
+  } catch (err) {
+    console.warn("Failed to subscribe to message views:", err);
+    return () => undefined;
+  }
 }

@@ -17,9 +17,9 @@ function DiscussionPage() {
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useState(() => {
+  useEffect(() => {
     if (channel) setValue(channel.discussionChatId ?? "");
-  });
+  }, [channel]);
 
   if (!me || !channel) return null;
 

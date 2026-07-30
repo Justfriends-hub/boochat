@@ -10,6 +10,7 @@ export function MessageBubble({
   m, isMine, senderName,
   onReply, onEdit, onDelete, onForward,
   replyToMessage,
+  isViewedByRecipient,
 }: {
   m: Message;
   isMine: boolean;
@@ -19,6 +20,7 @@ export function MessageBubble({
   onDelete?: () => void;
   onForward?: () => void;
   replyToMessage?: Message | null;
+  isViewedByRecipient?: boolean;
 }) {
   const deleted = !!m.deletedAt;
   return (
@@ -72,6 +74,7 @@ export function MessageBubble({
               <span>{formatTime(m.createdAt)}</span>
               {isMine && !deleted && (
                 m.status === "pending" ? <Clock className="h-3.5 w-3.5 opacity-70 animate-pulse" />
+                : isViewedByRecipient ? <CheckCheck className="h-3.5 w-3.5 text-sky-300" />
                 : m.status === "read" ? <CheckCheck className="h-3.5 w-3.5 text-sky-300" />
                 : m.status === "delivered" ? <CheckCheck className="h-3.5 w-3.5" />
                 : <Check className="h-3.5 w-3.5" />

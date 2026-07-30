@@ -14,6 +14,7 @@ function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
     name: row.name,
     description: row.description,
     avatar: row.avatar_url ?? `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.name)}`,
+    wallpaper: row.wallpaper_url ?? undefined,
     ownerId: row.owner_id,
     adminIds,
     memberIds: members,
@@ -49,11 +50,16 @@ async function fetchChannelAdmins(channelIds: string[]) {
 }
 
 async function resolveChannelAvatars(channels: Channel[]): Promise<Channel[]> {
-  const paths = channels.map((ch) => ch.avatar && !isFullUrl(ch.avatar) ? ch.avatar : undefined);
-  const signed = await batchGetImageUrls("channel-media", paths);
+  const avatarPaths = channels.map((ch) => ch.avatar && !isFullUrl(ch.avatar) ? ch.avatar : undefined);
+  const wallpaperPaths = channels.map((ch) => ch.wallpaper && !isFullUrl(ch.wallpaper) ? ch.wallpaper : undefined);
+  
+  const signedAvatars = await batchGetImageUrls("channel-media", avatarPaths);
+  const signedWallpapers = await batchGetImageUrls("channel-media", wallpaperPaths);
+  
   return channels.map((ch, idx) => ({
     ...ch,
-    avatar: signed[idx] ?? ch.avatar,
+    avatar: signedAvatars[idx] ?? ch.avatar,
+    wallpaper: signedWallpapers[idx] ?? ch.wallpaper,
   }));
 }
 
@@ -142,6 +148,9 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
       if (!isFullUrl(remoteChannel.avatar)) {
         remoteChannel.avatar = await getImageUrl("channel-media", remoteChannel.avatar);
       }
+      if (remoteChannel.wallpaper && !isFullUrl(remoteChannel.wallpaper)) {
+        remoteChannel.wallpaper = await getImageUrl("channel-media", remoteChannel.wallpaper);
+      }
       setState((s) => {
         const idx = s.channels.findIndex((c) => c.id === id);
         if (idx >= 0) s.channels[idx] = remoteChannel;
@@ -202,7 +211,7 @@ export async function createChannel(input: { name: string; description: string; 
   return ch;
 }
 
-export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[]; name?: string; description?: string; avatar?: string; visibility?: "public" | "private" }) {
+export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[]; name?: string; description?: string; avatar?: string; wallpaper?: string | null; visibility?: "public" | "private" }) {
   const supabase = ensureSupabase();
   
   const updateData: any = {};
@@ -218,6 +227,9 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
   if (updates.avatar !== undefined) {
     updateData.avatar_url = updates.avatar;
   }
+  if (updates.wallpaper !== undefined) {
+    updateData.wallpaper_url = updates.wallpaper;
+  }
   if (updates.visibility !== undefined) {
     updateData.visibility = updates.visibility;
   }
@@ -231,7 +243,7 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
     if (error) throw new Error(error.message);
   }
 
-  if (updates.visibility !== undefined || updates.avatar !== undefined || updates.name !== undefined || updates.description !== undefined) {
+  if (updates.visibility !== undefined || updates.avatar !== undefined || updates.wallpaper !== undefined || updates.name !== undefined || updates.description !== undefined) {
     setState((s) => {
       const channel = s.channels.find((c) => c.id === id);
       if (!channel) return;
@@ -243,6 +255,9 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
           ? updates.avatar
           : `channel-media:${updates.avatar}`; // placeholder until resolved below
       }
+      if (updates.wallpaper !== undefined) {
+        channel.wallpaper = updates.wallpaper === null ? undefined : (isFullUrl(updates.wallpaper) ? updates.wallpaper : `channel-media:${updates.wallpaper}`);
+      }
     });
   }
 
@@ -251,6 +266,14 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
     setState((s) => {
       const channel = s.channels.find((c) => c.id === id);
       if (channel) channel.avatar = resolvedAvatar;
+    });
+  }
+
+  if (updates.wallpaper !== undefined && updates.wallpaper !== null && !isFullUrl(updates.wallpaper)) {
+    const resolvedWallpaper = await getImageUrl("channel-media", updates.wallpaper);
+    setState((s) => {
+      const channel = s.channels.find((c) => c.id === id);
+      if (channel) channel.wallpaper = resolvedWallpaper;
     });
   }
 
