@@ -20,7 +20,7 @@ type Props = {
 export function SettingsRow({ icon: Icon, iconBg = "bg-muted", label, value, onClick, toggle, action, destructive, className }: Props) {
   if (destructive) {
     return (
-      <div className={`px-4 py-3 ${className ?? ""}"` + " text-center"}>
+      <div className={`px-4 py-3 ${className ?? ""} text-center`}>
         <button className="w-full text-destructive-foreground text-red-600 font-semibold" onClick={onClick}>
           {label}
         </button>

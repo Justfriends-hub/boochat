@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Button } from "@/components/ui/button";
 import { getChannel, updateChannel } from "@/api/channelsApi";
 import { useAuth } from "@/hooks/useAuth";
-import { useState } from "react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/channels/$channelId/settings/channel-type")({ component: ChannelTypePage });
@@ -16,9 +16,11 @@ function ChannelTypePage() {
   const [saving, setSaving] = useState(false);
   const [value, setValue] = useState<"public" | "private">("public");
 
-  useState(() => {
-    if (channel) setValue(channel.visibility);
-  });
+  useEffect(() => {
+    if (channel?.visibility) {
+      setValue(channel.visibility);
+    }
+  }, [channel]);
 
   if (!me || !channel) return null;
 

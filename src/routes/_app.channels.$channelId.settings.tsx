@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -129,6 +129,12 @@ function ChannelSettingsPage() {
   const isAdmin = !!channel?.adminIds.includes(me?.id ?? "");
   const canManage = isOwner || isAdmin;
   const canDelete = isOwner;
+
+  const isChildSettingsRoute = useRouterState({
+    select: (s) =>
+      s.location.pathname.startsWith(`/channels/${channelId}/settings/`) &&
+      !s.location.pathname.endsWith(`/channels/${channelId}/settings`),
+  });
 
   const subscriberCount = subscriberPage?.total ?? channel?.memberIds.length ?? 0;
   const subscriberList = subscriberPage?.subscribers ?? [];
@@ -291,7 +297,10 @@ function ChannelSettingsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        {isChildSettingsRoute ? (
+          <Outlet />
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-4">
             <Card>
               <CardHeader>
@@ -337,7 +346,7 @@ function ChannelSettingsPage() {
             </Card>
 
             <SettingsGroup>
-              <Link to={`/channels/${channelId}/settings/channel-type`} className="no-underline">
+              <Link to={( `/channels/${channelId}/settings/channel-type` as any )} className="no-underline">
                 <SettingsRow
                   icon={Zap}
                   iconBg="bg-blue-500"
@@ -346,7 +355,7 @@ function ChannelSettingsPage() {
                 />
               </Link>
 
-              <Link to={`/channels/${channelId}/settings/discussion`} className="no-underline">
+              <Link to={( `/channels/${channelId}/settings/discussion` as any )} className="no-underline">
                 <SettingsRow
                   icon={MessageCircle}
                   iconBg="bg-green-500"
@@ -355,7 +364,7 @@ function ChannelSettingsPage() {
                 />
               </Link>
 
-              <Link to={`/channels/${channelId}/settings/statistics`} className="no-underline">
+              <Link to={( `/channels/${channelId}/settings/statistics` as any )} className="no-underline">
                 <SettingsRow
                   icon={ShieldCheck}
                   iconBg="bg-rose-500"
@@ -364,7 +373,7 @@ function ChannelSettingsPage() {
                 />
               </Link>
 
-              <Link to={`/channels/${channelId}/settings/appearance`} className="no-underline">
+              <Link to={( `/channels/${channelId}/settings/appearance` as any )} className="no-underline">
                 <SettingsRow
                   icon={Settings}
                   iconBg="bg-orange-500"
@@ -379,7 +388,7 @@ function ChannelSettingsPage() {
                 toggle={{ checked: !!channel.autoTranslateEnabled, onChange: () => handleToggleAutoTranslate(), disabled: !canManage }}
               />
 
-              <Link to={`/channels/${channelId}/settings/direct-messages`} className="no-underline">
+              <Link to={( `/channels/${channelId}/settings/direct-messages` as any )} className="no-underline">
                 <SettingsRow
                   icon={MessageCircle}
                   iconBg="bg-indigo-500"
@@ -517,7 +526,7 @@ function ChannelSettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Administrators</CardTitle>
-                <CardDescription>Grant or revoke channel admin access. <Link to={`/channels/${channelId}/settings/administrators`} className="ml-2 text-sm">Manage</Link></CardDescription>
+                <CardDescription>Grant or revoke channel admin access. <Link to={( `/channels/${channelId}/settings/administrators` as any )} className="ml-2 text-sm">Manage</Link></CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {admins.length === 0 ? (
@@ -542,7 +551,7 @@ function ChannelSettingsPage() {
                         )}
                       </div>
                     ))}
-                    {admins.length > 3 ? <Link to={`/channels/${channelId}/settings/administrators`} className="text-sm">View all</Link> : null}
+                    {admins.length > 3 ? <Link to={( `/channels/${channelId}/settings/administrators` as any )} className="text-sm">View all</Link> : null}
                   </div>
                 )}
               </CardContent>
@@ -551,7 +560,7 @@ function ChannelSettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Subscribers</CardTitle>
-                <CardDescription>Search members and review who can see channel posts. <Link to={`/channels/${channelId}/settings/subscribers`} className="ml-2 text-sm">Manage</Link></CardDescription>
+                <CardDescription>Search members and review who can see channel posts. <Link to={( `/channels/${channelId}/settings/subscribers` as any )} className="ml-2 text-sm">Manage</Link></CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <Input
@@ -618,7 +627,7 @@ function ChannelSettingsPage() {
                 {recentActions.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No recent actions yet.</p>
                 ) : (
-                  recentActions.slice(0, 6).map((action) => (
+                  recentActions.slice(0, 6).map((action: any) => (
                     <div key={action.id} className="rounded-xl border p-3">
                       <p className="text-sm font-medium">{action.action}</p>
                       <p className="text-xs text-muted-foreground">By {action.adminId ?? "system"} · {timeAgo(action.createdAt)}</p>
@@ -673,6 +682,7 @@ function ChannelSettingsPage() {
             </Card>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
