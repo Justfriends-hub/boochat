@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { getChannel, addChannelToCommunity } from "@/api/channelsApi";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/_app/channels/$channelId/settings/communities")({ component: CommunitiesPage });
 
@@ -30,6 +31,11 @@ function CommunitiesPage() {
 
   return (
     <div className="p-4">
+      <div className="mb-4">
+        <Link to="/channels/$channelId/settings" params={{ channelId }} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
+      </div>
       <h2 className="mb-3 text-lg font-semibold">Communities</h2>
       <p className="mb-4 text-sm text-muted-foreground">Link this channel to a community by ID.</p>
       <div className="space-y-3 max-w-md">

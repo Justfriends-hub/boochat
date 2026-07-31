@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { getChannelSubscribers, getChannel } from "@/api/channelsApi";
 import { useAuth } from "@/hooks/useAuth";
+import { ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/_app/channels/$channelId/settings/subscribers")({ component: SubscribersPage });
 
@@ -24,6 +25,11 @@ function SubscribersPage() {
 
   return (
     <div className="p-4">
+      <div className="mb-4">
+        <Link to="/channels/$channelId/settings" params={{ channelId }} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
+      </div>
       <h2 className="mb-3 text-lg font-semibold">Subscribers</h2>
       <p className="mb-4 text-sm text-muted-foreground">View and search channel subscribers.</p>
       <div className="mb-3 max-w-md">

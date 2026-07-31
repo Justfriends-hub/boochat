@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getChannelRecentActions, getChannel } from "@/api/channelsApi";
+import { ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/_app/channels/$channelId/settings/recent-actions")({ component: RecentActionsPage });
 
@@ -20,6 +21,11 @@ function RecentActionsPage() {
 
   return (
     <div className="p-4">
+      <div className="mb-4">
+        <Link to="/channels/$channelId/settings" params={{ channelId }} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
+      </div>
       <h2 className="mb-3 text-lg font-semibold">Recent actions</h2>
       <p className="mb-4 text-sm text-muted-foreground">Audit log entries for this channel.</p>
       <div className="space-y-4">

@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import { getChannel, uploadChannelAvatar, updateChannel } from "@/api/channelsApi";
 import { uploadImage, getImageUrl } from "@/lib/imageUpload";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,11 @@ function AppearancePage() {
 
   return (
     <div className="p-4">
+      <div className="mb-4">
+        <Link to="/channels/$channelId/settings" params={{ channelId }} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
+      </div>
       <h2 className="mb-3 text-lg font-semibold">Appearance</h2>
       <p className="mb-4 text-sm text-muted-foreground">Customize the channel accent color, avatar, wallpaper, and allowed reactions.</p>
 

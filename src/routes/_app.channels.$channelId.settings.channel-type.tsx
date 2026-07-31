@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Button } from "@/components/ui/button";
 import { getChannel, updateChannel } from "@/api/channelsApi";
@@ -38,6 +39,11 @@ function ChannelTypePage() {
 
   return (
     <div className="p-4">
+      <div className="mb-4">
+        <Link to="/channels/$channelId/settings" params={{ channelId }} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
+      </div>
       <h2 className="mb-3 text-lg font-semibold">Channel type</h2>
       <p className="mb-4 text-sm text-muted-foreground">Choose whether the channel is public or private.</p>
       <div className="max-w-md">

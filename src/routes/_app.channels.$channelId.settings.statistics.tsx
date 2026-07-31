@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getChannelStatistics, getChannel } from "@/api/channelsApi";
+import { ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/_app/channels/$channelId/settings/statistics")({ component: StatisticsPage });
 
@@ -13,6 +14,11 @@ function StatisticsPage() {
 
   return (
     <div className="p-4">
+      <div className="mb-4">
+        <Link to="/channels/$channelId/settings" params={{ channelId }} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
+      </div>
       <h2 className="mb-3 text-lg font-semibold">Statistics</h2>
       <p className="mb-4 text-sm text-muted-foreground">Channel statistics overview.</p>
       <div className="grid gap-3 sm:grid-cols-3">
