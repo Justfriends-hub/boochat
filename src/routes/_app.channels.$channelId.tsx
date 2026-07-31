@@ -6,7 +6,7 @@ import { hasBrowserBackHistory } from "@/lib/utils";
 import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
-import { EmptyState } from "@/components/Composer";
+import { EmptyState } from "@/components/EmptyState";
 import {
   getChannel, listPosts, createPost, togglePostLike, markPostViewed, likeCount, viewCount,
   subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe, updateChannel,
