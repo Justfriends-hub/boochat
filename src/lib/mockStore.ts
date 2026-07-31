@@ -108,6 +108,8 @@ export type Channel = {
   allowDirectMessages?: boolean;
   inviteLink?: string | null;
   communityId?: string | null;
+  appearanceColor?: string;
+  allowedReactionEmojis?: string[];
   joinRequests?: JoinRequest[];
 };
 export type ChannelPost = {

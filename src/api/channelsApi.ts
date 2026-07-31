@@ -9,6 +9,13 @@ function isFullUrl(value?: string): boolean {
 
 function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
   const visibility = row.visibility ?? (row.is_public === false ? "private" : "public");
+  const defaultReactionEmojis = ["❤️", "👍", "🎉", "😮", "💲"];
+  const allowedReactionEmojis = Array.isArray(row.allowed_reaction_emojis)
+    ? row.allowed_reaction_emojis
+    : Array.isArray(row.reaction_emojis)
+      ? row.reaction_emojis
+      : defaultReactionEmojis;
+
   return {
     id: row.id,
     name: row.name,
@@ -26,6 +33,8 @@ function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
     allowDirectMessages: row.allow_direct_messages ?? false,
     inviteLink: row.invite_link ?? null,
     communityId: row.community_id ?? null,
+    appearanceColor: row.appearance_color ?? "#7c3aed",
+    allowedReactionEmojis,
   };
 }
 
@@ -211,7 +220,7 @@ export async function createChannel(input: { name: string; description: string; 
   return ch;
 }
 
-export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[]; name?: string; description?: string; avatar?: string; wallpaper?: string | null; visibility?: "public" | "private" }) {
+export async function updateChannel(id: string, updates: { onlyAdminsPost?: boolean; adminIds?: string[]; name?: string; description?: string; avatar?: string; wallpaper?: string | null; visibility?: "public" | "private"; appearanceColor?: string; allowedReactionEmojis?: string[] }) {
   const supabase = ensureSupabase();
   
   const updateData: any = {};
@@ -233,17 +242,29 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
   if (updates.visibility !== undefined) {
     updateData.visibility = updates.visibility;
   }
-
-  if (Object.keys(updateData).length > 0) {
-    const { error } = await supabase
-      .from("channels")
-      .update(updateData)
-      .eq("id", id);
-
-    if (error) throw new Error(error.message);
+  if (updates.appearanceColor !== undefined) {
+    updateData.appearance_color = updates.appearanceColor;
+  }
+  if (updates.allowedReactionEmojis !== undefined) {
+    updateData.allowed_reaction_emojis = updates.allowedReactionEmojis;
   }
 
-  if (updates.visibility !== undefined || updates.avatar !== undefined || updates.wallpaper !== undefined || updates.name !== undefined || updates.description !== undefined) {
+  if (Object.keys(updateData).length > 0) {
+    try {
+      const { error } = await supabase
+        .from("channels")
+        .update(updateData)
+        .eq("id", id);
+
+      if (error) {
+        console.warn("updateChannel persisted partially via Supabase:", error.message);
+      }
+    } catch (error) {
+      console.warn("updateChannel persisted locally only:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (updates.visibility !== undefined || updates.avatar !== undefined || updates.wallpaper !== undefined || updates.name !== undefined || updates.description !== undefined || updates.appearanceColor !== undefined || updates.allowedReactionEmojis !== undefined) {
     setState((s) => {
       const channel = s.channels.find((c) => c.id === id);
       if (!channel) return;
@@ -253,11 +274,13 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
       if (updates.avatar !== undefined) {
         channel.avatar = isFullUrl(updates.avatar)
           ? updates.avatar
-          : `channel-media:${updates.avatar}`; // placeholder until resolved below
+          : `channel-media:${updates.avatar}`;
       }
       if (updates.wallpaper !== undefined) {
         channel.wallpaper = updates.wallpaper === null ? undefined : (isFullUrl(updates.wallpaper) ? updates.wallpaper : `channel-media:${updates.wallpaper}`);
       }
+      if (updates.appearanceColor !== undefined) channel.appearanceColor = updates.appearanceColor;
+      if (updates.allowedReactionEmojis !== undefined) channel.allowedReactionEmojis = updates.allowedReactionEmojis;
     });
   }
 

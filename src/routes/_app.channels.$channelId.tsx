@@ -6,8 +6,7 @@ import { hasBrowserBackHistory } from "@/lib/utils";
 import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
-import { EmptyState } from "@/components/EmptyState";
-import { Composer } from "@/components/Composer";
+import { EmptyState } from "@/components/Composer";
 import {
   getChannel, listPosts, createPost, togglePostLike, markPostViewed, likeCount, viewCount,
   subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe, updateChannel,
@@ -279,7 +278,7 @@ function ChannelPage() {
 
   return (
     <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
-      <header className="flex h-16 items-center gap-2 border-b bg-card px-3">
+      <header className="flex h-16 items-center gap-2 border-b bg-card px-3" style={{ backgroundColor: channel?.appearanceColor ?? "#0f172a" }}>
         <Button
           variant="ghost"
           size="icon"
