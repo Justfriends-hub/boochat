@@ -20,6 +20,7 @@ import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppStatusRouteImport } from './routes/_app.status'
 import { Route as AuthLoginRouteImport } from './routes/auth.login'
 import { Route as AuthSignupRouteImport } from './routes/auth.signup'
+import { Route as DevCommentsRouteImport } from './routes/dev.comments'
 import { Route as JoinInviteCodeRouteImport } from './routes/join.$inviteCode'
 import { Route as AppChannelsChannelIdRouteImport } from './routes/_app.channels.$channelId'
 import { Route as AppChatsChatIdRouteImport } from './routes/_app.chats.$chatId'
@@ -90,6 +91,11 @@ const AuthLoginRoute = AuthLoginRouteImport.update({
 const AuthSignupRoute = AuthSignupRouteImport.update({
   id: '/auth/signup',
   path: '/auth/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DevCommentsRoute = DevCommentsRouteImport.update({
+  id: '/dev/comments',
+  path: '/dev/comments',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JoinInviteCodeRoute = JoinInviteCodeRouteImport.update({
@@ -200,6 +206,7 @@ export interface FileRoutesByFullPath {
   '/status': typeof AppStatusRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
+  '/dev/comments': typeof DevCommentsRoute
   '/join/$inviteCode': typeof JoinInviteCodeRoute
   '/channels/$channelId': typeof AppChannelsChannelIdRouteWithChildren
   '/chats/$chatId': typeof AppChatsChatIdRoute
@@ -229,6 +236,7 @@ export interface FileRoutesByTo {
   '/status': typeof AppStatusRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
+  '/dev/comments': typeof DevCommentsRoute
   '/join/$inviteCode': typeof JoinInviteCodeRoute
   '/channels/$channelId': typeof AppChannelsChannelIdRouteWithChildren
   '/chats/$chatId': typeof AppChatsChatIdRoute
@@ -260,6 +268,7 @@ export interface FileRoutesById {
   '/_app/status': typeof AppStatusRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/signup': typeof AuthSignupRoute
+  '/dev/comments': typeof DevCommentsRoute
   '/join/$inviteCode': typeof JoinInviteCodeRoute
   '/_app/channels/$channelId': typeof AppChannelsChannelIdRouteWithChildren
   '/_app/chats/$chatId': typeof AppChatsChatIdRoute
@@ -291,6 +300,7 @@ export interface FileRouteTypes {
     | '/status'
     | '/auth/login'
     | '/auth/signup'
+    | '/dev/comments'
     | '/join/$inviteCode'
     | '/channels/$channelId'
     | '/chats/$chatId'
@@ -320,6 +330,7 @@ export interface FileRouteTypes {
     | '/status'
     | '/auth/login'
     | '/auth/signup'
+    | '/dev/comments'
     | '/join/$inviteCode'
     | '/channels/$channelId'
     | '/chats/$chatId'
@@ -350,6 +361,7 @@ export interface FileRouteTypes {
     | '/_app/status'
     | '/auth/login'
     | '/auth/signup'
+    | '/dev/comments'
     | '/join/$inviteCode'
     | '/_app/channels/$channelId'
     | '/_app/chats/$chatId'
@@ -374,6 +386,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   AuthLoginRoute: typeof AuthLoginRoute
   AuthSignupRoute: typeof AuthSignupRoute
+  DevCommentsRoute: typeof DevCommentsRoute
   JoinInviteCodeRoute: typeof JoinInviteCodeRoute
   ExploreChannelChannelIdRoute: typeof ExploreChannelChannelIdRoute
   ExploreGroupGroupIdRoute: typeof ExploreGroupGroupIdRoute
@@ -456,6 +469,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/signup'
       fullPath: '/auth/signup'
       preLoaderRoute: typeof AuthSignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dev/comments': {
+      id: '/dev/comments'
+      path: '/dev/comments'
+      fullPath: '/dev/comments'
+      preLoaderRoute: typeof DevCommentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/join/$inviteCode': {
@@ -697,6 +717,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   AuthLoginRoute: AuthLoginRoute,
   AuthSignupRoute: AuthSignupRoute,
+  DevCommentsRoute: DevCommentsRoute,
   JoinInviteCodeRoute: JoinInviteCodeRoute,
   ExploreChannelChannelIdRoute: ExploreChannelChannelIdRoute,
   ExploreGroupGroupIdRoute: ExploreGroupGroupIdRoute,

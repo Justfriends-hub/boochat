@@ -1,11 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createFileRoute } from '@tanstack/react-router';
 
 // This route implements the locked visual system (CSS + animation)
 // and wires a unified typing -> addComment pipeline plus reverse-chron
 // pagination across multiple posts (mocked). Keep the visual styles
 // and animation timing identical to the original snippet.
 
-export default function DevComments() {
+export const Route = createFileRoute('/dev/comments')({
+  component: DevComments,
+});
+
+function DevComments() {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const typingRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);

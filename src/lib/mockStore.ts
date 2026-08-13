@@ -262,7 +262,16 @@ export function setState(mutator: (s: Store) => void) {
 
 export function initStore() {
   if (typeof window === "undefined") return;
-  // Do not auto-seed demo data. The app should start with a clean store.
+  const hasChannelSeed = state.channels.length > 0 || state.channelPosts.length > 0 || state.comments.length > 0;
+  if (hasChannelSeed) return;
+
+  try {
+    const { seed } = require("./seed");
+    seed(state);
+    save();
+  } catch (error) {
+    console.warn("Unable to seed demo channel data:", error);
+  }
 }
 
 export function resetStore() {
