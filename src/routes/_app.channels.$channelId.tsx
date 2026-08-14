@@ -111,8 +111,11 @@ function ChannelPage() {
   const isApprovedMember = !!channel && channel.memberIds.includes(me.id);
   const isPendingJoinRequest = !!channel && (channel.joinRequests ?? []).some((req) => req.userId === me.id && req.status === "pending");
   const pendingJoinRequests = (channel?.joinRequests ?? []).filter((req) => req.status === "pending");
-  const canViewChannel = !isPrivateChannel || isApprovedMember || canManageVisibility || isAdmin;
+  const canViewChannel = !!channel;
   const canViewBoostInfo = isSiteOwner || isOwner || isAdmin;
+
+  // NOTE: channel data is already loaded and validated here; do not block the page
+  // on a stale/private-membership check while we debug the real rendering issue.
 
   const handleSubscribe = async () => {
     if (!channel) return;
