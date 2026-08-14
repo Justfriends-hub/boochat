@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { subscribe } from "@/lib/eventBus";
 import { hasBrowserBackHistory } from "@/lib/utils";
 import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
@@ -57,17 +57,17 @@ function ChannelPage() {
   const { data: posts = [] } = useQuery({ queryKey: ["posts", channelId], queryFn: () => listPosts(channelId) });
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
 
-  useEffect(() => subscribeToChannels(() => {
+  // Memoize invalidation callback to prevent duplicate subscriptions caused by qc dependency changes
+  const handleInvalidateQueries = useCallback(() => {
     qc.invalidateQueries({ queryKey: ["posts", channelId] });
     qc.invalidateQueries({ queryKey: ["channel", channelId] });
-  }), [channelId, qc]);
-  useEffect(() => {
-    const unsub = subscribe("channels:changed", () => {
-      qc.invalidateQueries({ queryKey: ["channel", channelId] });
-      qc.invalidateQueries({ queryKey: ["posts", channelId] });
-    });
-    return unsub;
   }, [channelId, qc]);
+
+  useEffect(() => subscribeToChannels(handleInvalidateQueries), [channelId, handleInvalidateQueries]);
+  useEffect(() => {
+    const unsub = subscribe("channels:changed", handleInvalidateQueries);
+    return unsub;
+  }, [channelId, handleInvalidateQueries]);
   
   // Debug: log posts and query cache to help diagnose missing posts
   useEffect(() => {
