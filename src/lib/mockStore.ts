@@ -268,11 +268,19 @@ export function initStore() {
   try {
     const { seed } = require("./seed");
     seed(state);
-    // Note: do NOT save demo data to localStorage; it will be purged on next load.
-    // Keep it in-memory only so it persists during the session.
+    // Note: do NOT save demo data to localStorage; it will be kept in-memory only
+    // so it persists during the session. This provides a fallback when Supabase fails.
   } catch (error) {
     console.warn("Unable to seed demo channel data:", error);
   }
+}
+
+// Ensure seed is always available on demand (used as fallback when APIs fail)
+export function ensureSeed() {
+  if (typeof window === "undefined") return;
+  const hasChannelSeed = state.channels.length > 0 || state.channelPosts.length > 0;
+  if (hasChannelSeed) return;
+  initStore();
 }
 
 export function resetStore() {

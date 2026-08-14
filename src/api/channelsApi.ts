@@ -1,4 +1,4 @@
-import { getState, setState, uid, type Channel, type ChannelPost, type Comment, type JoinRequest } from "@/lib/mockStore";
+import { getState, setState, uid, ensureSeed, type Channel, type ChannelPost, type Comment, type JoinRequest } from "@/lib/mockStore";
 import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
@@ -92,6 +92,7 @@ async function fetchChannelMembers(channelIds: string[]) {
 }
 
 export async function listChannels(): Promise<Channel[]> {
+  ensureSeed(); // Ensure seed data is available as fallback
   try {
     const supabase = ensureSupabase();
     const { data: channels, error: channelError } = await supabase
@@ -129,10 +130,13 @@ export async function listChannels(): Promise<Channel[]> {
   } catch (error) {
     console.warn("Unable to load remote channels, returning cached channels:", error);
   }
-  return getState().channels;
+  const fallbackChannels = getState().channels;
+  console.warn(`[Supabase offline] Returning ${fallbackChannels.length} cached/seeded channels`);
+  return fallbackChannels;
 }
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
+  ensureSeed(); // Ensure seed data is available as fallback
   try {
     const supabase = ensureSupabase();
     const { data: channelRow, error: channelError } = await supabase
@@ -766,6 +770,7 @@ export async function addChannelToCommunity(channelId: string, communityId: stri
 }
 
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
+  ensureSeed(); // Ensure seed data is available as fallback
   try {
     const supabase = ensureSupabase();
     let query = supabase.from("channel_posts").select("*");
@@ -814,10 +819,13 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
   const posts = channelId
     ? getState().channelPosts.filter((p) => p.channelId === channelId)
     : [...getState().channelPosts];
-  return posts.sort((a, b) => b.createdAt - a.createdAt);
+  const sorted = posts.sort((a, b) => b.createdAt - a.createdAt);
+  console.warn(`[Supabase offline] Returning ${sorted.length} cached/seeded posts for channel ${channelId || "all"}`);
+  return sorted;
 }
 
 export async function getPost(id: string): Promise<ChannelPost | undefined> {
+  ensureSeed(); // Ensure seed data is available as fallback
   try {
     const supabase = ensureSupabase();
     const { data: post, error } = await supabase
