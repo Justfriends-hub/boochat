@@ -68,6 +68,18 @@ function ChannelPage() {
     });
     return unsub;
   }, [channelId, qc]);
+  
+  // Debug: log posts and query cache to help diagnose missing posts
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line no-console
+      console.debug("[ChannelPage] posts", channelId, posts);
+      // eslint-disable-next-line no-console
+      console.debug("[ChannelPage] query cache (posts)", qc.getQueryData(["posts", channelId]));
+    } catch (err) {
+      // ignore
+    }
+  }, [channelId, posts, qc]);
   useEffect(() => {
     const unsub = subscribe(`channel:${channelId}`, () => {
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
