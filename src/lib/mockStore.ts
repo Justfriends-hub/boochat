@@ -268,7 +268,8 @@ export function initStore() {
   try {
     const { seed } = require("./seed");
     seed(state);
-    save();
+    // Note: do NOT save demo data to localStorage; it will be purged on next load.
+    // Keep it in-memory only so it persists during the session.
   } catch (error) {
     console.warn("Unable to seed demo channel data:", error);
   }

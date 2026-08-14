@@ -242,7 +242,7 @@ function ChannelPage() {
   const doLike = (post: ChannelPost) => {
     qc.setQueryData<ChannelPost[]>(["posts", channelId], (old) =>
       old?.map((p) => p.id === post.id
-        ? { ...p, likes: p.likes.includes(me.id) ? p.likes.filter((u) => u !== me.id) : [...p.likes, me.id] }
+        ? { ...p, likes: (p.likes ?? []).includes(me.id) ? (p.likes ?? []).filter((u) => u !== me.id) : [...(p.likes ?? []), me.id] }
         : p),
     );
     togglePostLike(post.id, me.id);
@@ -354,7 +354,7 @@ function ChannelPage() {
               {p.image && <img src={p.image} alt="" className="mt-2 max-h-80 w-full rounded-xl object-cover" />}
               <footer className="mt-3 flex items-center gap-4 text-sm text-muted-foreground pt-1 border-t">
                 <button onClick={() => doLike(p)} className="flex items-center gap-1.5 hover:text-foreground font-medium">
-                  <Heart className={p.likes.includes(me.id) ? "h-4 w-4 fill-red-500 text-red-500" : "h-4 w-4"} />
+                  <Heart className={(p.likes ?? []).includes(me.id) ? "h-4 w-4 fill-red-500 text-red-500" : "h-4 w-4"} />
                   {likeCount(p)}
                 </button>
                 <button onClick={() => setOpenPost(p)} className="flex items-center gap-1.5 hover:text-foreground font-medium">

@@ -950,6 +950,15 @@ export async function createPost(input: {
       boostedViews: post.boosted_views,
     };
 
+    // Ensure the local mock store reflects the newly created post so the UI
+    // shows it immediately when Supabase is unreachable or while the
+    // optimistic update completes.
+    try {
+      setState((s) => { s.channelPosts.unshift(mappedPost); });
+    } catch (err) {
+      // ignore
+    }
+
     publish("channels:changed");
     publish(`channel:${input.channelId}`);
     return mappedPost;
@@ -1070,11 +1079,11 @@ export function subscribeToComments(postId: string, cb: () => void) {
 }
 
 export function likeCount(p: ChannelPost) {
-  return p.likes.length + (p.boostedLikes || 0);
+  return (p.likes?.length ?? 0) + (p.boostedLikes ?? 0);
 }
 
 export function viewCount(p: ChannelPost) {
-  return p.views.length + (p.boostedViews || 0);
+  return (p.views?.length ?? 0) + (p.boostedViews ?? 0);
 }
 
 function isVisibilitySchemaError(error: any) {
