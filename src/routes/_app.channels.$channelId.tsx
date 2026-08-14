@@ -1,7 +1,6 @@
 import { createFileRoute, Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useCallback } from "react";
-import { subscribe } from "@/lib/eventBus";
 import { hasBrowserBackHistory } from "@/lib/utils";
 import { ArrowLeft, Heart, Eye, MessageSquare, Share2, Image as ImageIcon, Send, ShieldCheck, Lock, Info, Settings, Link as LinkIcon, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Composer } from "@/components/Composer";
 
 export const Route = createFileRoute("/_app/channels/$channelId")({
   component: ChannelPage,
@@ -35,9 +35,9 @@ function ChannelPage() {
   const me = useAuth()!;
   const qc = useQueryClient();
   const sessionId = useUIStore((s) => s.sessionId);
-  const isSettingsView = useRouterState(
-    (s) => s.location.pathname.includes(`/channels/${channelId}/settings`),
-  );
+  const isSettingsView = useRouterState({
+    select: (s) => s.location.pathname.includes(`/channels/${channelId}/settings`),
+  });
 
   const [openPost, setOpenPost] = useState<ChannelPost | null>(null);
   const [postText, setPostText] = useState("");
@@ -50,64 +50,23 @@ function ChannelPage() {
   const [shareLink, setShareLink] = useState("");
   const [copied, setCopied] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
-  const [debugSummary, setDebugSummary] = useState("");
-  const [debugHistory, setDebugHistory] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
 
-  const { data: channel, isLoading: channelLoading, error: channelError } = useQuery({ queryKey: ["channel", channelId], queryFn: () => getChannel(channelId) });
-  const { data: posts = [], isLoading: postsLoading, error: postsError, status: postsStatus } = useQuery({ queryKey: ["posts", channelId], queryFn: () => listPosts(channelId) });
+  const { data: channel, isLoading: channelLoading, error: channelError } = useQuery({ queryKey: ["channel", channelId], queryFn: () => getChannel(channelId), staleTime: 30_000, gcTime: 5 * 60 * 1000 });
+  const { data: posts = [], isLoading: postsLoading, error: postsError, status: postsStatus } = useQuery({ queryKey: ["posts", channelId], queryFn: () => listPosts(channelId), staleTime: 30_000, gcTime: 5 * 60 * 1000 });
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
 
-  // Memoize invalidation callback to prevent duplicate subscriptions caused by qc dependency changes
   const handleInvalidateQueries = useCallback(() => {
     console.log("🔄 [ChannelPage] Invalidating queries for channel:", channelId);
     qc.invalidateQueries({ queryKey: ["posts", channelId] });
     qc.invalidateQueries({ queryKey: ["channel", channelId] });
   }, [channelId, qc]);
 
-  useEffect(() => subscribeToChannels(handleInvalidateQueries), [channelId, handleInvalidateQueries]);
   useEffect(() => {
-    const unsub = subscribe("channels:changed", handleInvalidateQueries);
+    const unsub = subscribeToChannels(handleInvalidateQueries);
     return unsub;
-  }, [channelId, handleInvalidateQueries]);
-  
-  // Aggressive Debug Logging
-  useEffect(() => {
-    const lines = [
-      `Channel ID: ${channelId}`,
-      `Channel data: ${channel ? JSON.stringify(channel) : "undefined"}`,
-      `Posts count: ${posts.length}`,
-      `Posts data: ${JSON.stringify(posts)}`,
-      `Posts loading: ${postsLoading}`,
-      `Posts status: ${postsStatus}`,
-      `Posts error: ${postsError ? JSON.stringify(postsError) : "null"}`,
-      `Query cache (posts): ${JSON.stringify(qc.getQueryData(["posts", channelId]))}`,
-      `Query cache (channel): ${JSON.stringify(qc.getQueryData(["channel", channelId]))}`,
-    ];
-    const nextSummary = lines.join("\n");
-    setDebugSummary(nextSummary);
-    setDebugHistory((s) => [...s, nextSummary]);
-
-    console.group("🔍 [ChannelPage] DEBUG STATE");
-    console.log("Channel ID:", channelId);
-    console.log("Channel data:", channel);
-    console.log("Posts count:", posts.length);
-    console.log("Posts data:", posts);
-    console.log("Posts loading:", postsLoading);
-    console.log("Posts status:", postsStatus);
-    console.log("Posts error:", postsError);
-    console.log("Query cache (posts):", qc.getQueryData(["posts", channelId]));
-    console.log("Query cache (channel):", qc.getQueryData(["channel", channelId]));
-    console.groupEnd();
-  }, [channelId, channel, posts, postsLoading, postsStatus, postsError, qc]);
-  useEffect(() => {
-    const unsub = subscribe(`channel:${channelId}`, () => {
-      qc.invalidateQueries({ queryKey: ["channel", channelId] });
-      qc.invalidateQueries({ queryKey: ["posts", channelId] });
-    });
-    return unsub;
-  }, [channelId, qc]);
+  }, [handleInvalidateQueries]);
 
   useEffect(() => {
     posts.forEach((p) => markPostViewed(p.id, sessionId));
@@ -130,9 +89,6 @@ function ChannelPage() {
   const pendingJoinRequests = (channel?.joinRequests ?? []).filter((req) => req.status === "pending");
   const canViewChannel = !!channel;
   const canViewBoostInfo = isSiteOwner || isOwner || isAdmin;
-
-  // NOTE: channel data is already loaded and validated here; do not block the page
-  // on a stale/private-membership check while we debug the real rendering issue.
 
   const handleSubscribe = async () => {
     if (!channel) return;
@@ -224,7 +180,7 @@ function ChannelPage() {
         authorId: me.id,
         kind: postImage ? "image" : "text",
         body: postText.trim(),
-        image: postImage, // File object — API handles compress+upload
+        image: postImage,
       });
       qc.invalidateQueries({ queryKey: ["posts", channelId] });
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
@@ -243,9 +199,7 @@ function ChannelPage() {
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Revoke previous preview
     if (postImagePreview) URL.revokeObjectURL(postImagePreview);
-    // Store File for upload; create object URL for preview
     setPostImage(file);
     setPostImagePreview(URL.createObjectURL(file));
     e.target.value = "";
@@ -255,7 +209,6 @@ function ChannelPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
-    // Use uploadChannelAvatar for compression + Supabase Storage
     uploadChannelAvatar(channelId, file)
       .then((signedUrl) => {
         setWallpaperUrl(signedUrl);
@@ -284,46 +237,20 @@ function ChannelPage() {
     togglePostLike(post.id, me.id);
   };
 
-  const copyDebugState = async () => {
-    const text = debugSummary || [
-      `channelId: ${channelId}`,
-      `channel: ${channel ? JSON.stringify(channel) : "undefined"}`,
-      `posts: ${posts ? JSON.stringify(posts) : "[]"}`,
-    ].join("\n");
-
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        throw new Error("Clipboard API unavailable");
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.warn("Failed to copy debug state:", err);
-      toast.error("Could not copy debug state");
-    }
-  };
-
-  const copyAllDebug = async () => {
-    const text = debugHistory.length ? debugHistory.join("\n\n---\n\n") : debugSummary;
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        throw new Error("Clipboard API unavailable");
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-      toast.success("All debug copied to clipboard!");
-    } catch (err) {
-      console.warn("Failed to copy all debug state:", err);
-      toast.error("Could not copy debug history");
-    }
-  };
+  if (channelLoading && !channel) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+        Loading channel…
+      </div>
+    );
+  }
 
   if (!channel) {
-    return null;
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+        Channel unavailable. Try again.
+      </div>
+    );
   }
 
   if (isPrivateChannel && !canViewChannel) {
@@ -352,22 +279,6 @@ function ChannelPage() {
 
   return (
     <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
-      {import.meta.env.DEV && (
-        <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Debug</p>
-            <Button size="sm" variant="outline" onClick={copyDebugState} className="h-7 px-2 text-xs">
-              {copied ? "Copied" : "Copy debug"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={copyAllDebug} className="h-7 px-2 text-xs">
-              Copy all
-            </Button>
-          </div>
-          <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words text-[10px] text-amber-900">
-            {debugSummary || "No debug state yet"}
-          </pre>
-        </div>
-      )}
       <header className="flex h-16 items-center gap-2 border-b bg-card px-3" style={{ backgroundColor: channel?.appearanceColor ?? "#0f172a" }}>
         <Button
           variant="ghost"
@@ -422,22 +333,6 @@ function ChannelPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {/* DEBUG PANEL */}
-        <div className="sticky top-0 z-10 bg-red-50 border-2 border-red-300 rounded-lg p-3 mb-3 text-xs">
-          <div className="font-bold text-red-900">🚨 DEBUG: Channel Posts</div>
-          <div className="mt-2 space-y-1 text-red-800 font-mono text-[11px]">
-            <div>📍 Channel ID: <span className="font-bold bg-red-200 px-1">{channelId}</span></div>
-            <div>📊 Posts in state: <span className="font-bold bg-red-200 px-1">{posts.length}</span></div>
-            <div>⏳ Loading: <span className="font-bold bg-red-200 px-1">{postsLoading ? "YES" : "NO"}</span></div>
-            <div>📈 Status: <span className="font-bold bg-red-200 px-1">{postsStatus}</span></div>
-            {postsError && <div>❌ Error: <span className="font-bold">{String(postsError)}</span></div>}
-            <div className="mt-2 p-2 bg-red-100 rounded border border-red-200">
-              <div className="font-bold">Raw Posts Data:</div>
-              <pre className="text-[10px] overflow-auto max-h-48">{JSON.stringify(posts, null, 2)}</pre>
-            </div>
-          </div>
-        </div>
-
         {isSettingsView ? (
           <Outlet />
         ) : posts.length === 0 ? (
