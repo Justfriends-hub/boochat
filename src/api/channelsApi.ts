@@ -136,16 +136,21 @@ export async function listChannels(): Promise<Channel[]> {
 }
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
+  console.log("🔍 [getChannel] ENTRY - fetching channel with ID:", id);
   ensureSeed(); // Ensure seed data is available as fallback
   try {
     const supabase = ensureSupabase();
+    console.log("🌐 [getChannel] Supabase ready, querying channel:", id);
     const { data: channelRow, error: channelError } = await supabase
       .from("channels")
       .select("*")
       .eq("id", id)
       .single();
 
+    console.log("📦 [getChannel] Supabase response:", { hasData: !!channelRow, error: channelError });
+
     if (!channelError && channelRow) {
+      console.log("✨ [getChannel] SUCCESS - got channel from Supabase:", channelRow);
       const { data: memberRows } = await supabase
         .from("channel_members")
         .select("user_id")
@@ -173,16 +178,20 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
         if (idx >= 0) s.channels[idx] = remoteChannel;
         else s.channels.push(remoteChannel);
       });
+      console.log("🎯 [getChannel] RETURNING SUPABASE CHANNEL:", remoteChannel);
       return remoteChannel;
     }
 
     if (channelError) {
-      console.error("getChannel: failed to query channel", id, channelError);
+      console.error("❌ [getChannel] Supabase error - falling back to mock store:", id, channelError);
     }
   } catch (error) {
-    console.warn("Unable to load remote channel, returning cached channel:", error);
+    console.error("💥 [getChannel] EXCEPTION - falling back to mock store:", error);
   }
-  return getState().channels.find((c) => c.id === id);
+  
+  const cached = getState().channels.find((c) => c.id === id);
+  console.warn(`⚠️  [FALLBACK] Returning cached/seeded channel for ID ${id}:`, cached);
+  return cached;
 }
 
 export async function createChannel(input: { name: string; description: string; ownerId: string; onlyAdminsPost?: boolean; visibility?: "public" | "private" }) {
@@ -770,18 +779,31 @@ export async function addChannelToCommunity(channelId: string, communityId: stri
 }
 
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
+  console.log("🔍 [listPosts] ENTRY - fetching posts for channel:", channelId);
   ensureSeed(); // Ensure seed data is available as fallback
+  console.log("✅ [listPosts] Seed ensured. Current mock state:", {
+    channelPostsCount: getState().channelPosts.length,
+    channelPostIds: getState().channelPosts.map((p) => ({ id: p.id, channelId: p.channelId, body: p.body.substring(0, 30) })),
+  });
+  
   try {
     const supabase = ensureSupabase();
+    console.log("🌐 [listPosts] Supabase client ready, constructing query for channel:", channelId);
+    
     let query = supabase.from("channel_posts").select("*");
     
     if (channelId) {
       query = query.eq("channel_id", channelId);
+      console.log("🔽 [listPosts] Filtered query for channel_id:", channelId);
     }
     
+    console.log("⏳ [listPosts] Executing Supabase query...");
     const { data: posts, error } = await query.order("created_at", { ascending: false });
     
+    console.log("📦 [listPosts] Supabase response:", { postsCount: posts?.length, hasError: !!error, error });
+    
     if (!error && posts) {
+      console.log("✨ [listPosts] SUCCESS - got posts from Supabase:", posts.length, posts.slice(0, 2));
       // Map Supabase posts to ChannelPost type
       const mappedPosts: ChannelPost[] = posts.map((p: any) => ({
         id: p.id,
@@ -797,6 +819,7 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
         boostedViews: p.boosted_views,
         pinned: p.pinned,
       }));
+      console.log("🗺️  [listPosts] Mapped posts:", mappedPosts.length);
 
       // Batch-resolve image_url storage paths to signed URLs
       const imagePaths = mappedPosts.map((p) => p.image ?? null);
@@ -805,22 +828,28 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
         ...p,
         image: imageUrls[i] ?? p.image,
       }));
-
+      console.log("🎯 [listPosts] RETURNING SUPABASE POSTS:", resolved.length);
       return resolved;
     }
 
     if (error) {
-      console.error("listPosts: failed to query Supabase channel posts", { channelId, error });
+      console.error("❌ [listPosts] Supabase error - falling back to mock store:", { channelId, error });
     }
   } catch (error) {
-    console.warn("Unable to load remote posts:", error);
+    console.error("💥 [listPosts] EXCEPTION - falling back to mock store:", error);
   }
   
+  const allChannelPosts = getState().channelPosts;
+  console.log("🔎 [listPosts] Mock store search - total posts available:", allChannelPosts.length);
+  console.log("📋 [listPosts] All posts in store:", allChannelPosts.map((p) => ({ id: p.id, channelId: p.channelId })));
+  
   const posts = channelId
-    ? getState().channelPosts.filter((p) => p.channelId === channelId)
-    : [...getState().channelPosts];
+    ? allChannelPosts.filter((p) => p.channelId === channelId)
+    : [...allChannelPosts];
+  console.log("🔽 [listPosts] Filtered posts for channel", channelId, ":", posts.length, posts);
+  
   const sorted = posts.sort((a, b) => b.createdAt - a.createdAt);
-  console.warn(`[Supabase offline] Returning ${sorted.length} cached/seeded posts for channel ${channelId || "all"}`);
+  console.warn(`⚠️  [FALLBACK] Returning ${sorted.length} cached/seeded posts for channel ${channelId || "all"}`);
   return sorted;
 }
 

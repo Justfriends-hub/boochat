@@ -53,12 +53,13 @@ function ChannelPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
 
-  const { data: channel } = useQuery({ queryKey: ["channel", channelId], queryFn: () => getChannel(channelId) });
-  const { data: posts = [] } = useQuery({ queryKey: ["posts", channelId], queryFn: () => listPosts(channelId) });
+  const { data: channel, isLoading: channelLoading, error: channelError } = useQuery({ queryKey: ["channel", channelId], queryFn: () => getChannel(channelId) });
+  const { data: posts = [], isLoading: postsLoading, error: postsError, status: postsStatus } = useQuery({ queryKey: ["posts", channelId], queryFn: () => listPosts(channelId) });
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
 
   // Memoize invalidation callback to prevent duplicate subscriptions caused by qc dependency changes
   const handleInvalidateQueries = useCallback(() => {
+    console.log("🔄 [ChannelPage] Invalidating queries for channel:", channelId);
     qc.invalidateQueries({ queryKey: ["posts", channelId] });
     qc.invalidateQueries({ queryKey: ["channel", channelId] });
   }, [channelId, qc]);
@@ -69,17 +70,20 @@ function ChannelPage() {
     return unsub;
   }, [channelId, handleInvalidateQueries]);
   
-  // Debug: log posts and query cache to help diagnose missing posts
+  // Aggressive Debug Logging
   useEffect(() => {
-    try {
-      // eslint-disable-next-line no-console
-      console.debug("[ChannelPage] posts", channelId, posts);
-      // eslint-disable-next-line no-console
-      console.debug("[ChannelPage] query cache (posts)", qc.getQueryData(["posts", channelId]));
-    } catch (err) {
-      // ignore
-    }
-  }, [channelId, posts, qc]);
+    console.group("🔍 [ChannelPage] DEBUG STATE");
+    console.log("Channel ID:", channelId);
+    console.log("Channel data:", channel);
+    console.log("Posts count:", posts.length);
+    console.log("Posts data:", posts);
+    console.log("Posts loading:", postsLoading);
+    console.log("Posts status:", postsStatus);
+    console.log("Posts error:", postsError);
+    console.log("Query cache (posts):", qc.getQueryData(["posts", channelId]));
+    console.log("Query cache (channel):", qc.getQueryData(["channel", channelId]));
+    console.groupEnd();
+  }, [channelId, channel, posts, postsLoading, postsStatus, postsError, qc]);
   useEffect(() => {
     const unsub = subscribe(`channel:${channelId}`, () => {
       qc.invalidateQueries({ queryKey: ["channel", channelId] });
@@ -344,6 +348,22 @@ function ChannelPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* DEBUG PANEL */}
+        <div className="sticky top-0 z-10 bg-red-50 border-2 border-red-300 rounded-lg p-3 mb-3 text-xs">
+          <div className="font-bold text-red-900">🚨 DEBUG: Channel Posts</div>
+          <div className="mt-2 space-y-1 text-red-800 font-mono text-[11px]">
+            <div>📍 Channel ID: <span className="font-bold bg-red-200 px-1">{channelId}</span></div>
+            <div>📊 Posts in state: <span className="font-bold bg-red-200 px-1">{posts.length}</span></div>
+            <div>⏳ Loading: <span className="font-bold bg-red-200 px-1">{postsLoading ? "YES" : "NO"}</span></div>
+            <div>📈 Status: <span className="font-bold bg-red-200 px-1">{postsStatus}</span></div>
+            {postsError && <div>❌ Error: <span className="font-bold">{String(postsError)}</span></div>}
+            <div className="mt-2 p-2 bg-red-100 rounded border border-red-200">
+              <div className="font-bold">Raw Posts Data:</div>
+              <pre className="text-[10px] overflow-auto max-h-48">{JSON.stringify(posts, null, 2)}</pre>
+            </div>
+          </div>
+        </div>
+
         {isSettingsView ? (
           <Outlet />
         ) : posts.length === 0 ? (
