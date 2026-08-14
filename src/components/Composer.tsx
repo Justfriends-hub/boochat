@@ -38,29 +38,10 @@ export function Composer({
   const timerRef = useRef<number | null>(null);
   const shouldSendAfterStop = useRef(false);
 
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const user = useAuth();
 
   const [showPicker, setShowPicker] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.visualViewport) return;
-
-    const handleResize = () => {
-      if (!window.visualViewport) return;
-      const offset = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
-      setKeyboardOffset(Math.max(0, offset));
-    };
-
-    window.visualViewport.addEventListener("resize", handleResize);
-    window.visualViewport.addEventListener("scroll", handleResize);
-
-    return () => {
-      window.visualViewport?.removeEventListener("resize", handleResize);
-      window.visualViewport?.removeEventListener("scroll", handleResize);
-    };
-  }, []);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -206,13 +187,7 @@ export function Composer({
   };
 
   return (
-    <div
-      className="shrink-0 border-t bg-background/95 backdrop-blur z-20 transition-transform duration-100"
-      style={{
-        transform: keyboardOffset > 0 ? `translateY(-${keyboardOffset}px)` : "none",
-        paddingBottom: keyboardOffset > 0 ? "4px" : "env(safe-area-inset-bottom)",
-      }}
-    >
+    <div className="shrink-0 border-t bg-background/95 backdrop-blur z-20 transition-transform duration-100">
       {replyTo && (
         <div className="flex items-start gap-2 border-l-2 border-primary bg-muted/50 px-3 py-2">
           <div className="flex-1 min-w-0">
@@ -258,148 +233,77 @@ export function Composer({
                   <img
                     src={pendingImage.preview}
                     alt="Attachment preview"
-                    className="h-16 w-16 rounded-lg object-cover border"
+                    className="h-24 w-24 rounded-lg object-cover border"
                   />
                   <button
                     type="button"
-                    onClick={cleanupPendingImage}
+                    onClick={() => cleanupPendingImage()}
+                    className="absolute -top-2 -right-2 grid h-5 w-5 place-items-center rounded-full bg-destructive text-xs text-destructive-foreground"
                     aria-label="Remove attachment"
-                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs grid place-items-center"
                   >
-                    <X className="h-3 w-3" />
+                    <X className="h-3 w-3" aria-hidden="true" />
                   </button>
                 </div>
               )}
               {pendingAudio && (
-                <div className="flex min-w-0 items-center gap-3 rounded-2xl border bg-muted px-3 py-2">
-                  <audio controls src={pendingAudio.preview} className="flex-1 min-w-0 max-w-full rounded-lg bg-black/5" />
-                  <div className="text-xs text-muted-foreground whitespace-nowrap">
-                    {String(Math.floor(pendingAudio.duration / 60)).padStart(2, "0")}:
-                    {String(pendingAudio.duration % 60).padStart(2, "0")}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={cleanupPendingAudio}
-                    aria-label="Discard voice recording"
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
+                <div className="inline-flex items-center gap-2 self-start rounded-full border bg-muted px-3 py-1 text-xs text-muted-foreground">
+                  <Mic className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{pendingAudio.duration}s</span>
+                  <button type="button" onClick={() => cleanupPendingAudio()} aria-label="Remove voice message">
+                    <X className="h-3 w-3" aria-hidden="true" />
                   </button>
                 </div>
               )}
-              <div className="flex min-w-0 items-end rounded-3xl border bg-muted px-3 py-1.5">
-                <label htmlFor="composer-input" className="sr-only">Message</label>
+              <div className="flex items-end gap-2">
                 <textarea
-                  id="composer-input"
                   ref={textareaRef}
-                  value={value}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    onChange(v);
-                    const caret = (e.target.selectionStart as number) || v.length;
-                    const lineStart = Math.max(0, v.lastIndexOf("\n", caret - 1) + 1);
-                    const isAtLineStartSlash = v[lineStart] === "/";
-                    const shouldOpen = !!user?.isUpgraded && isAtLineStartSlash;
-                    if (shouldOpen) {
-                      const q = v.substring(lineStart + 1, caret);
-                      setPickerQuery(q);
-                      setShowPicker(true);
-                    } else {
-                      setShowPicker(false);
-                    }
-                  }}
-                  onFocus={() => {
-                    window.scrollTo(0, 0);
-                    if (document.body) document.body.scrollTop = 0;
-                  }}
-                  placeholder={
-                    pendingImage
-                      ? "Add a caption… (or just press Send)"
-                      : pendingAudio
-                      ? "Voice message ready to send"
-                      : placeholder
-                  }
-                  aria-label="Message"
-                  disabled={disabled}
                   rows={1}
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  placeholder={placeholder}
+                  disabled={disabled}
+                  className="max-h-32 min-h-10 flex-1 resize-none overflow-y-auto rounded-2xl border bg-background px-3 py-2 text-sm outline-none ring-0 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   onKeyDown={(e) => {
-                    if (showPicker && e.key === "Escape") {
-                      e.preventDefault();
-                      setShowPicker(false);
-                      return;
-                    }
-                    if (e.key === "Enter" && !e.shiftKey && !showPicker) {
+                    if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       send();
-                    } else if (e.key === "Escape" && (replyTo || value)) {
-                      e.preventDefault();
-                      if (replyTo) onClearReply?.();
-                      else onChange("");
                     }
                   }}
-                  className={cn(
-                    "flex-1 resize-none bg-transparent py-1.5 text-base md:text-sm outline-none placeholder:text-muted-foreground",
-                  )}
-                  style={{ maxHeight: 128, fontSize: "16px" }}
                 />
-                {showPicker && (
-                  <div className="absolute left-4 bottom-20 z-50">
-                    <QuickReplyPicker
-                      query={pickerQuery}
-                      onClose={() => setShowPicker(false)}
-                      onSelect={(qr) => {
-                        // Replace the "/shortcut" on the current line with the quick reply body
-                        const el = textareaRef.current;
-                        if (!el) return;
-                        const caret = el.selectionStart || value.length;
-                        const lineStart = Math.max(0, value.lastIndexOf("\n", caret - 1) + 1);
-                        const before = value.substring(0, lineStart);
-                        const after = value.substring(caret);
-                        const inserted = qr.body;
-                        const next = before + inserted + after;
-                        onChange(next);
-                        setShowPicker(false);
-                        // place caret after inserted text
-                        requestAnimationFrame(() => {
-                          if (textareaRef.current) {
-                            const pos = (before + inserted).length;
-                            textareaRef.current.selectionStart = textareaRef.current.selectionEnd = pos;
-                            textareaRef.current.focus();
-                          }
-                        });
-                      }}
-                    />
-                  </div>
-                )}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={insertEmoji}
-                  aria-label="Insert emoji"
-                  className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label="Add emoji"
+                  className="shrink-0"
                 >
-                  <Smile className="h-5 w-5" aria-hidden="true" />
-                </button>
+                  <Smile className="h-4 w-4" aria-hidden="true" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={send}
+                  disabled={disabled || (!value.trim() && !pendingImage && !pendingAudio)}
+                  className="shrink-0"
+                >
+                  <Send className="h-4 w-4" aria-hidden="true" />
+                </Button>
               </div>
             </div>
-            {(pendingAudio || value.trim() || pendingImage) ? (
-              <Button size="icon" onClick={send} aria-label="Send message" className="shrink-0 rounded-full">
-                <Send className="h-5 w-5" aria-hidden="true" />
-              </Button>
-            ) : (
-              <Button
-                size="icon"
-                variant="ghost"
-                type="button"
-                onClick={startRec}
-                aria-label="Record voice message"
-                className="shrink-0 rounded-full"
-              >
-                <Mic className="h-5 w-5" aria-hidden="true" />
-              </Button>
-            )}
           </>
         )}
       </div>
+      {showPicker && (
+        <QuickReplyPicker
+          query={pickerQuery}
+          onSelect={(picked) => {
+            onChange(`${value}${value ? " " : ""}${picked}`);
+            setShowPicker(false);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
     </div>
   );
 }

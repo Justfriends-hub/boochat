@@ -122,6 +122,10 @@ export async function listChannels(): Promise<Channel[]> {
       setState((s) => { s.channels = remoteChannels; });
       return remoteChannels;
     }
+
+    if (channelError) {
+      console.error("listChannels: failed to query Supabase channels", channelError);
+    }
   } catch (error) {
     console.warn("Unable to load remote channels, returning cached channels:", error);
   }
@@ -166,6 +170,10 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
         else s.channels.push(remoteChannel);
       });
       return remoteChannel;
+    }
+
+    if (channelError) {
+      console.error("getChannel: failed to query channel", id, channelError);
     }
   } catch (error) {
     console.warn("Unable to load remote channel, returning cached channel:", error);
@@ -795,6 +803,10 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
 
       return resolved;
     }
+
+    if (error) {
+      console.error("listPosts: failed to query Supabase channel posts", { channelId, error });
+    }
   } catch (error) {
     console.warn("Unable to load remote posts:", error);
   }
@@ -838,6 +850,10 @@ export async function getPost(id: string): Promise<ChannelPost | undefined> {
         boostedViews: post.boosted_views,
         pinned: post.pinned,
       };
+    }
+
+    if (error) {
+      console.error("getPost: failed to query Supabase post", id, error);
     }
   } catch (error) {
     console.warn("Unable to load remote post:", error);

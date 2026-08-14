@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { AppNav } from "@/components/AppNav";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { useAuth, useAuthReady } from "@/hooks/useAuth";
+import { useAppHeight } from "@/hooks/useVisualViewport";
 import { initStore, getState } from "@/lib/mockStore";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ function AppLayout() {
   const qc = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const isLoading = useRouterState({ select: (s) => s.status === "pending" || s.isLoading });
+  const appHeight = useAppHeight();
 
   const isDetailRoute = typeof pathname === "string" && (
     (pathname.startsWith("/chats/") && pathname !== "/chats") ||
@@ -56,14 +58,14 @@ function AppLayout() {
 
   if (!ready || !me) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-background p-4">
+      <div className="flex items-center justify-center bg-background p-4" style={{ height: `${appHeight || 0}px` }}>
         <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary border-t-transparent animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="relative flex h-dvh w-full overflow-hidden bg-background text-foreground">
+    <div className="relative flex w-full overflow-hidden bg-background text-foreground" style={{ height: `${appHeight || 0}px` }}>
       {isLoading && (
         <div className="absolute top-0 left-0 right-0 z-50 h-1 bg-primary/20 overflow-hidden">
           <div className="h-full bg-primary animate-pulse w-full" />
