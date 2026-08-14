@@ -50,6 +50,8 @@ function ChannelPage() {
   const [shareLink, setShareLink] = useState("");
   const [copied, setCopied] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [debugSummary, setDebugSummary] = useState("");
+  const [debugHistory, setDebugHistory] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
 
@@ -72,6 +74,21 @@ function ChannelPage() {
   
   // Aggressive Debug Logging
   useEffect(() => {
+    const lines = [
+      `Channel ID: ${channelId}`,
+      `Channel data: ${channel ? JSON.stringify(channel) : "undefined"}`,
+      `Posts count: ${posts.length}`,
+      `Posts data: ${JSON.stringify(posts)}`,
+      `Posts loading: ${postsLoading}`,
+      `Posts status: ${postsStatus}`,
+      `Posts error: ${postsError ? JSON.stringify(postsError) : "null"}`,
+      `Query cache (posts): ${JSON.stringify(qc.getQueryData(["posts", channelId]))}`,
+      `Query cache (channel): ${JSON.stringify(qc.getQueryData(["channel", channelId]))}`,
+    ];
+    const nextSummary = lines.join("\n");
+    setDebugSummary(nextSummary);
+    setDebugHistory((s) => [...s, nextSummary]);
+
     console.group("🔍 [ChannelPage] DEBUG STATE");
     console.log("Channel ID:", channelId);
     console.log("Channel data:", channel);
@@ -267,6 +284,44 @@ function ChannelPage() {
     togglePostLike(post.id, me.id);
   };
 
+  const copyDebugState = async () => {
+    const text = debugSummary || [
+      `channelId: ${channelId}`,
+      `channel: ${channel ? JSON.stringify(channel) : "undefined"}`,
+      `posts: ${posts ? JSON.stringify(posts) : "[]"}`,
+    ].join("\n");
+
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.warn("Failed to copy debug state:", err);
+      toast.error("Could not copy debug state");
+    }
+  };
+
+  const copyAllDebug = async () => {
+    const text = debugHistory.length ? debugHistory.join("\n\n---\n\n") : debugSummary;
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      toast.success("All debug copied to clipboard!");
+    } catch (err) {
+      console.warn("Failed to copy all debug state:", err);
+      toast.error("Could not copy debug history");
+    }
+  };
+
   if (!channel) {
     return null;
   }
@@ -297,6 +352,22 @@ function ChannelPage() {
 
   return (
     <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
+      {import.meta.env.DEV && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Debug</p>
+            <Button size="sm" variant="outline" onClick={copyDebugState} className="h-7 px-2 text-xs">
+              {copied ? "Copied" : "Copy debug"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={copyAllDebug} className="h-7 px-2 text-xs">
+              Copy all
+            </Button>
+          </div>
+          <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words text-[10px] text-amber-900">
+            {debugSummary || "No debug state yet"}
+          </pre>
+        </div>
+      )}
       <header className="flex h-16 items-center gap-2 border-b bg-card px-3" style={{ backgroundColor: channel?.appearanceColor ?? "#0f172a" }}>
         <Button
           variant="ghost"

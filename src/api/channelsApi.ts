@@ -1110,21 +1110,52 @@ export async function addComment(input: { postId: string; authorId: string; body
 }
 
 export function subscribeToChannels(cb: () => void) {
-  try {
-    const supabase = ensureSupabase();
-    const channel = supabase.channel("channels");
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "channels" }, () => cb());
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "channel_members" }, () => cb());
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "channel_posts" }, () => cb());
-    channel.subscribe();
+  const channelKey = "channels";
 
-    return () => {
-      channel.unsubscribe();
-    };
-  } catch (error) {
-    console.warn("Unable to subscribe to channel updates:", error);
-    return () => undefined;
+  const globalKey = Symbol.for("boochat.channelRealtime.listeners");
+  const globalState = ((globalThis as any)[globalKey] ?? {
+    handlers: new Set<() => void>(),
+    subscription: null,
+  }) as {
+    handlers: Set<() => void>;
+    subscription: { unsubscribe: () => void } | null;
+  };
+  (globalThis as any)[globalKey] = globalState;
+
+  globalState.handlers.add(cb);
+
+  if (!globalState.subscription) {
+    try {
+      const supabase = ensureSupabase();
+      const channel = supabase.channel(channelKey);
+      const notify = () => {
+        Array.from(globalState.handlers as Set<() => void>).forEach((handler) => handler());
+      };
+
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "channels" }, notify);
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "channel_members" }, notify);
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "channel_posts" }, notify);
+      channel.subscribe();
+      globalState.subscription = channel;
+    } catch (error) {
+      console.warn("Unable to subscribe to channel updates:", error);
+      return () => {
+        globalState.handlers.delete(cb);
+      };
+    }
   }
+
+  return () => {
+    globalState.handlers.delete(cb);
+    if (globalState.handlers.size === 0 && globalState.subscription) {
+      try {
+        globalState.subscription.unsubscribe();
+      } catch (error) {
+        console.warn("Failed to unsubscribe from channel realtime:", error);
+      }
+      globalState.subscription = null;
+    }
+  };
 }
 
 export function subscribeToComments(postId: string, cb: () => void) {
