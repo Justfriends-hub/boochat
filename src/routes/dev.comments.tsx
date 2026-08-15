@@ -78,6 +78,40 @@ function DevComments() {
     return row;
   }
 
+  // Create a post block containing the post node (avatar + title) and a
+  // comments container. The thread-line visually links the node to comments.
+  function createPostBlock(post: { id?: string; title: string; ts: string }) {
+    const block = document.createElement('div');
+    block.className = 'post-block';
+
+    const node = document.createElement('div');
+    node.className = 'post-node enter';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar avatar--post';
+    avatar.style.background = avatarColors[Math.floor(Math.random() * avatarColors.length)];
+    avatar.textContent = 'P';
+
+    const title = document.createElement('div');
+    title.className = 'post-title';
+    title.textContent = `${post.title} — ${post.ts}`;
+
+    node.appendChild(avatar);
+    node.appendChild(title);
+
+    const thread = document.createElement('div');
+    thread.className = 'thread-line';
+
+    const commentsContainer = document.createElement('div');
+    commentsContainer.className = 'post-comments';
+
+    block.appendChild(node);
+    block.appendChild(thread);
+    block.appendChild(commentsContainer);
+
+    return block;
+  }
+
   // showTyping must be identical in look & timing to locked system
   function showTyping(ms = 1400) {
     const typingRow = typingRef.current!;
@@ -98,7 +132,15 @@ function DevComments() {
   function addCommentDOM(node: HTMLElement) {
     const feed = feedRef.current!;
     const typingRow = typingRef.current!;
-    feed.insertBefore(node, typingRow);
+    // Append to the most recent post-block's comments container. If none,
+    // fall back to inserting directly before the typing row.
+    const lastBlock = feed.querySelector('.post-block:last-of-type') as HTMLElement | null;
+    if (lastBlock) {
+      const comments = lastBlock.querySelector('.post-comments')!;
+      comments.appendChild(node);
+    } else {
+      feed.insertBefore(node, typingRow);
+    }
     feed.scrollTop = feed.scrollHeight;
     setCount((c) => c + 1);
   }
@@ -113,10 +155,16 @@ function DevComments() {
   // Initial mount: render the initial post's comments directly (but still animate)
   useEffect(() => {
     (async () => {
+      const feed = feedRef.current!;
+      const typingRow = typingRef.current!;
+      // Create the initial post block (current post) and insert before typing row
       const initial = POSTS[0];
+      const block = createPostBlock(initial);
+      feed.insertBefore(block, typingRow);
+
+      // Add initial comments into that block via the same pipeline (keeps animation consistent)
       for (const c of initial.comments) {
         await pipelineAdd({ name: c.name, text: c.text, mine: false });
-        // tiny stagger between initial comments
         await new Promise((r) => setTimeout(r, 120));
       }
     })();
@@ -146,30 +194,22 @@ function DevComments() {
 
           // fetch the next post batch
           const post = await fetchOlderPost(nextPostIndex);
-          // insert divider + comments at the TOP of the existing feed so older posts
-          // appear above newer ones (new comments remain at the bottom)
-          const firstComment = feed.querySelector('.row, .post-divider');
-          const divider = document.createElement('div');
-          divider.className = 'post-divider';
-          divider.textContent = `${post.title} — ${post.ts}`;
-          if (firstComment) {
-            feed.insertBefore(divider, firstComment);
+          // Create a post-block and insert it before the first existing block/comment
+          const firstBlock = feed.querySelector('.row, .post-block');
+          const newBlock = createPostBlock(post);
+          if (firstBlock) {
+            feed.insertBefore(newBlock, firstBlock);
           } else {
-            feed.insertBefore(divider, typingRow);
+            feed.insertBefore(newBlock, typingRow);
           }
 
-          // Insert comments so that their internal order remains oldest -> newest
-          // We iterate from newest -> oldest and insert before the firstComment so
-          // that the final order (top->bottom) is oldest ... newest ... current
+          // Insert comments into the new block so their order is oldest -> newest
           const comments = post.comments.slice();
-          for (let i = comments.length - 1; i >= 0; i--) {
+          const commentsContainer = newBlock.querySelector('.post-comments')!;
+          for (let i = 0; i < comments.length; i++) {
             const c = comments[i];
             const node = createRowNode({ name: c.name, text: c.text, mine: false });
-            if (firstComment) {
-              feed.insertBefore(node, firstComment);
-            } else {
-              feed.insertBefore(node, typingRow);
-            }
+            commentsContainer.appendChild(node);
             // small stagger for the animation
             await new Promise((r) => setTimeout(r, 160));
           }
@@ -253,6 +293,14 @@ function DevComments() {
   .send:active{ transform: scale(0.85); }\
   .send svg{ width:16px; height:16px; }\
   .hint{ text-align:center; font-size: 11px; color: var(--text-dim); padding-bottom: 6px; }\
+  /* Thread / post-node visuals */\
+  .post-block{ position: relative; padding-left: 46px; display:flex; flex-direction:column; gap:8px; }\
+  .post-node{ display:flex; align-items:center; gap:10px; color: var(--text); font-weight:600; font-size:13px; }\
+  .post-node.enter{ animation: dropIn 0.62s cubic-bezier(0.34, 1.56, 0.64, 1) both; transform-origin: left top; }\
+  .post-node .post-title{ color: var(--text-dim); font-weight:600; font-size:13px; }
+  .avatar--post{ width:26px; height:26px; font-size:12px; }
+  .thread-line{ position:absolute; left:28px; top:36px; bottom:0; width:2px; background: rgba(255,255,255,0.04); border-radius:2px; }
+  .post-comments{ display:flex; flex-direction:column; gap:12px; padding-left: 6px; }
   .post-divider{ text-align:center; color:var(--text-dim); font-size:12px; padding:6px 0; opacity:0.9; }\
 `}</style>
 
