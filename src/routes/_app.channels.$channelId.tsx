@@ -421,7 +421,7 @@ function ChannelPage() {
 
       <Sheet open={!!openPost} onOpenChange={(o) => !o && setOpenPost(null)}>
         <SheetContent side="bottom" className="h-[80dvh] flex flex-col p-0">
-          {openPost && <PostDetail post={openPost} onClose={() => setOpenPost(null)} />}
+          {openPost && <PostDetail post={openPost} posts={posts} channel={channel} onClose={() => setOpenPost(null)} />}
         </SheetContent>
       </Sheet>
 
@@ -648,48 +648,227 @@ function ChannelPage() {
   );
 }
 
-function PostDetail({ post }: { post: ChannelPost; onClose: () => void }) {
+function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; posts: ChannelPost[]; channel?: any; onClose: () => void }) {
   const me = useAuth()!;
   const qc = useQueryClient();
-  const [text, setText] = useState("");
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
-  const { data: comments = [] } = useQuery({
-    queryKey: ["comments", post.id],
-    queryFn: () => listComments(post.id),
-  });
-  useEffect(() => subscribeToComments(post.id, () =>
-    qc.invalidateQueries({ queryKey: ["comments", post.id] })), [post.id, qc]);
+
+  // Refs for DOM-managed feed (preserve locked visual system and animations)
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  const typingRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // track rendered comment ids to avoid duplicates
+  const rendered = useRef(new Set<string>());
+
+  // determine index of current post in provided posts list (newest first)
+  const currentIndex = posts.findIndex((p) => p.id === post.id);
+  const nextPostIndexRef = useRef(currentIndex + 1);
+  const loadingOlderRef = useRef(false);
+
+  // Avatar colors (locked system)
+  const avatarColors = ['#e0637a', '#5b8cff', '#3fb27f', '#c98a3e', '#8a63e0'];
+
+  function initials(name?: string) {
+    if (!name) return '??';
+    return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  }
+
+  function createRowNode({ id, authorId, text, mine = false }: { id?: string; authorId?: string; text: string; mine?: boolean }) {
+    const row = document.createElement('div');
+    row.className = 'row enter' + (mine ? ' mine' : '');
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.style.background = avatarColors[Math.floor(Math.random() * avatarColors.length)];
+    const user = users.find((u) => u.id === authorId);
+    avatar.textContent = mine ? 'Y' : initials(user?.displayName);
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = mine ? `<p></p>` : `<div class="name">${user?.displayName ?? 'Unknown'}</div><p></p>`;
+    bubble.querySelector('p')!.textContent = text;
+
+    if (!mine) row.appendChild(avatar);
+    row.appendChild(bubble);
+    if (mine) row.appendChild(avatar);
+
+    if (id) row.dataset.commentId = id;
+    return row;
+  }
+
+  function showTyping(ms = 1400) {
+    const typingRow = typingRef.current!;
+    const feed = feedRef.current!;
+    const distanceFromBottom = Math.abs(feed.scrollHeight - (feed.scrollTop + feed.clientHeight));
+    const atBottom = distanceFromBottom < 48;
+    typingRow.classList.add('show');
+    if (atBottom) feed.scrollTop = feed.scrollHeight;
+    return new Promise<void>((res) => setTimeout(() => {
+      typingRow.classList.remove('show');
+      res();
+    }, ms));
+  }
+
+  function addCommentDOM(node: HTMLElement) {
+    const feed = feedRef.current!;
+    const typingRow = typingRef.current!;
+    // insert before typing row so typing stays at bottom
+    feed.insertBefore(node, typingRow);
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  async function pipelineAddComment(c: { id?: string; authorId?: string; body: string; mine?: boolean }) {
+    // avoid re-rendering same comment
+    if (c.id && rendered.current.has(c.id)) return;
+    await showTyping(1300 + Math.random() * 800);
+    const node = createRowNode({ id: c.id, authorId: c.authorId, text: c.body, mine: !!c.mine });
+    if (c.id) rendered.current.add(c.id);
+    addCommentDOM(node);
+  }
+
+  // Load initial comments for the opened post using the unified pipeline (visual-only)
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const cs = await listComments(post.id);
+      for (const c of cs) {
+        if (!mounted) return;
+        await pipelineAddComment({ id: c.id, authorId: c.authorId, body: c.body, mine: c.authorId === me.id });
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id]);
+
+  // Subscribe to comments for this post and pipeline any new comments
+  useEffect(() => {
+    const unsub = subscribeToComments(post.id, async () => {
+      const cs = await listComments(post.id);
+      for (const c of cs) {
+        if (!rendered.current.has(c.id)) {
+          await pipelineAddComment({ id: c.id, authorId: c.authorId, body: c.body, mine: c.authorId === me.id });
+        }
+      }
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id]);
+
+  // IntersectionObserver sentinel to load older post comments into same feed
+  useEffect(() => {
+    const feed = feedRef.current!;
+    const sentinel = sentinelRef.current!;
+    if (!feed || !sentinel) return;
+    const io = new IntersectionObserver(async (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting && !loadingOlderRef.current && nextPostIndexRef.current < posts.length) {
+          loadingOlderRef.current = true;
+          const prevScrollTop = feed.scrollTop;
+          const prevScrollHeight = feed.scrollHeight;
+
+          const olderPost = posts[nextPostIndexRef.current];
+          // insert divider at top
+          const firstChild = feed.querySelector('.row, .post-divider');
+          const divider = document.createElement('div');
+          divider.className = 'post-divider';
+          divider.textContent = `${olderPost.body.slice(0, 40)} — ${timeAgo(olderPost.createdAt)}`;
+          if (firstChild) feed.insertBefore(divider, firstChild);
+          else feed.insertBefore(divider, typingRef.current!);
+
+          // fetch and insert comments for older post
+          const cs = await listComments(olderPost.id);
+          // insert so oldest appears above
+          for (let i = cs.length - 1; i >= 0; i--) {
+            const c = cs[i];
+            if (rendered.current.has(c.id)) continue;
+            const node = createRowNode({ id: c.id, authorId: c.authorId, text: c.body, mine: c.authorId === me.id });
+            if (firstChild) feed.insertBefore(node, firstChild);
+            else feed.insertBefore(node, typingRef.current!);
+            rendered.current.add(c.id);
+            await new Promise((r) => setTimeout(r, 160));
+          }
+
+          // restore scroll position
+          const newScrollHeight = feed.scrollHeight;
+          const delta = newScrollHeight - prevScrollHeight;
+          feed.scrollTop = prevScrollTop + delta;
+
+          nextPostIndexRef.current += 1;
+          loadingOlderRef.current = false;
+        }
+      }
+    }, { root: feed, threshold: 0.1 });
+    io.observe(sentinel);
+    return () => io.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts]);
+
+  // Send handler: call addComment API (persist) and rely on subscription to pipeline-add the comment
+  const handleSend = async (p: { kind: string; body: string }) => {
+    if (p.kind !== 'text') return;
+    await addComment({ postId: post.id, authorId: me.id, body: p.body });
+    // schedule an automated reply from another channel member (if available)
+    const botId = (channel?.memberIds?.find((id: string) => id !== me.id) ?? me.id) as string;
+    setTimeout(async () => {
+      const replies = [
+        "Nice, that reads well!",
+        "Love it, very smooth.",
+        "That's the elastic curve doing its thing 😄",
+        "Clean — exactly the vibe."
+      ];
+      const reply = replies[Math.floor(Math.random() * replies.length)];
+      // persist automated reply as a normal comment author (botId)
+      await addComment({ postId: post.id, authorId: botId, body: reply });
+    }, 900 + Math.random() * 900);
+  };
 
   return (
     <>
+      <style>{`\
+  /* Locked visual system copied from dev preview to preserve animations */\
+  .row{ display:flex; gap: 10px; align-items: flex-end; }\
+  .avatar{ width: 30px; height: 30px; border-radius: 50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size: 12px; font-weight: 700; color: #fff; }\
+  .row.enter{ animation: dropIn 0.62s cubic-bezier(0.34, 1.56, 0.64, 1) both; transform-origin: bottom left; }\
+  @keyframes dropIn{ 0%{ opacity: 0; transform: translateY(26px) scale(0.85); } 60%{ opacity: 1; transform: translateY(-4px) scale(1.02); } 100%{ opacity: 1; transform: translateY(0) scale(1); } }\
+  .bubble{ background: var(--bubble); padding: 10px 14px; border-radius: var(--radius); border-bottom-left-radius: 4px; max-width: 78%; }\
+  .row.mine{ justify-content:flex-end; }\
+  .row.mine .bubble{ background: var(--accent); border-bottom-left-radius: var(--radius); border-bottom-right-radius: 4px; }\
+  .bubble .name{ font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 2px; }\
+  .row.mine .bubble .name{ display:none; }\
+  .bubble p{ margin:0; font-size: 14.5px; line-height: 1.35; color: var(--text); }\
+  .typing-row{ display:flex; align-items:center; gap: 10px; height: 0; opacity: 0; overflow: hidden; transition: height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease; }\
+  .typing-row.show{ height: 40px; opacity: 1; }\
+  .typing-bubble{ background: var(--bubble-alt); border-radius: var(--radius); border-bottom-left-radius: 4px; padding: 11px 16px; display:flex; gap: 5px; align-items:center; }\
+  .typing-bubble .dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); animation: elasticBounce 1s cubic-bezier(0.45, 0, 0.55, 1) infinite; }\
+  .typing-bubble .dot:nth-child(2){ animation-delay: 0.15s; }\
+  .typing-bubble .dot:nth-child(3){ animation-delay: 0.3s; }\
+  @keyframes elasticBounce{ 0%, 60%, 100%{ transform: translateY(0) scale(1); } 25%{ transform: translateY(-7px) scale(1.15); } }\
+  .post-divider{ text-align:center; color:var(--text-dim); font-size:12px; padding:6px 0; opacity:0.9; }\
+`}</style>
+
       <SheetHeader className="p-4 border-b">
         <SheetTitle>Comments & Discussion</SheetTitle>
       </SheetHeader>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+
+      <div className="flex-1 overflow-y-auto p-4" ref={feedRef}>
         <div className="rounded-xl bg-muted p-3 text-sm whitespace-pre-wrap font-medium">{post.body}</div>
-        {comments.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">No comments yet. Start the conversation!</p>
-        ) : comments.map((c) => {
-          const u = users.find((x) => x.id === c.authorId);
-          return (
-            <div key={c.id} className="flex gap-2">
-              <UserAvatar name={u?.displayName || ""} src={u?.avatar} size={32} />
-              <div className="flex-1 rounded-xl bg-muted p-2.5">
-                <p className="text-xs font-semibold">{u?.displayName}</p>
-                <p className="text-sm mt-0.5">{c.body}</p>
-              </div>
-            </div>
-          );
-        })}
+
+        <div className="typing-row" ref={typingRef}>
+          <div className="avatar" style={{ background: '#c98a3e' }}>ZG</div>
+          <div className="typing-bubble">
+            <span className="dot"></span><span className="dot"></span><span className="dot"></span>
+          </div>
+        </div>
+
+        <div id="feed-sentinel" ref={sentinelRef} style={{ height: 1 }} />
       </div>
+
       <Composer
-        value={text}
-        onChange={setText}
-        onSend={(p) => {
-          if (p.kind !== "text") return;
-          addComment({ postId: post.id, authorId: me.id, body: p.body });
-          setText("");
-        }}
+        value={''}
+        onChange={() => {}}
+        onSend={handleSend}
         placeholder="Add a comment..."
       />
     </>
