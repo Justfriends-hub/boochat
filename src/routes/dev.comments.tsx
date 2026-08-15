@@ -103,7 +103,7 @@ function DevComments() {
     setCount((c) => c + 1);
   }
 
-  // Unified pipeline: user and other comments should go through showTyping -> addComment
+  // Unified pipeline: every comment (user, other, automated) should go through showTyping -> addComment
   async function pipelineAdd({ name, text, mine = false }: { name?: string; text: string; mine?: boolean }) {
     await showTyping(1300 + Math.random() * 800);
     const node = createRowNode({ name, text, mine });
@@ -189,14 +189,19 @@ function DevComments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingOlder, nextPostIndex]);
 
-  // Send handler: user message only; no automated reply generated
+  // Send handler: user message then immediate auto reply (via same pipeline)
   function send() {
     const input = inputRef.current!;
     const text = input.value.trim();
     if (!text) return;
+    // user's message (mine) must also pass through typing->add to keep unified entrance
     (async () => {
       await pipelineAdd({ text, mine: true });
       input.value = '';
+      // simulate someone else replying immediately via the same pipeline
+      setTimeout(async () => {
+        await pipelineAdd({ name: 'AutoBot', text: 'How are you doing? I want to see how the design is okayyy' });
+      }, 300);
     })();
   }
 
