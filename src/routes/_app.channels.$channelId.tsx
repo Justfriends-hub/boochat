@@ -663,7 +663,7 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
 
   // determine index of current post in provided posts list (newest first)
   const currentIndex = posts.findIndex((p) => p.id === post.id);
-  const nextPostIndexRef = useRef(currentIndex + 1);
+  const nextPostIndexRef = useRef(currentIndex > 0 ? currentIndex - 1 : -1);
   const loadingOlderRef = useRef(false);
 
   // Avatar colors (locked system)
@@ -758,52 +758,65 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
 
   // IntersectionObserver sentinel to load older post comments into same feed
   useEffect(() => {
-    const feed = feedRef.current!;
-    const sentinel = sentinelRef.current!;
+    const feed = feedRef.current;
+    const sentinel = sentinelRef.current;
     if (!feed || !sentinel) return;
+
+    const loadOlderBatch = async () => {
+      if (loadingOlderRef.current || nextPostIndexRef.current < 0) return;
+      loadingOlderRef.current = true;
+
+      const prevScrollTop = feed.scrollTop;
+      const prevScrollHeight = feed.scrollHeight;
+
+      const olderPost = posts[nextPostIndexRef.current];
+      if (!olderPost) {
+        loadingOlderRef.current = false;
+        return;
+      }
+
+      const divider = document.createElement('div');
+      divider.className = 'post-divider';
+      const postOrdinal = `${nextPostIndexRef.current + 2}th post`;
+      divider.innerHTML = `
+        <span class="post-divider-line"></span>
+        <span class="post-divider-content">
+          <span class="post-divider-title">Older post</span>
+          <span class="post-divider-meta">${postOrdinal} • ${timeAgo(olderPost.createdAt)}</span>
+        </span>
+        <span class="post-divider-line"></span>
+      `;
+      feed.insertBefore(divider, typingRef.current);
+
+      const comments = await listComments(olderPost.id);
+      for (const c of comments) {
+        if (rendered.current.has(c.id)) continue;
+        const node = createRowNode({ id: c.id, authorId: c.authorId, text: c.body, mine: c.authorId === me.id });
+        feed.insertBefore(node, typingRef.current);
+        rendered.current.add(c.id);
+        await new Promise((r) => setTimeout(r, 160));
+      }
+
+      const newScrollHeight = feed.scrollHeight;
+      const delta = newScrollHeight - prevScrollHeight;
+      feed.scrollTop = prevScrollTop + delta;
+
+      nextPostIndexRef.current -= 1;
+      loadingOlderRef.current = false;
+    };
+
     const io = new IntersectionObserver(async (entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting && !loadingOlderRef.current && nextPostIndexRef.current < posts.length) {
-          loadingOlderRef.current = true;
-          const prevScrollTop = feed.scrollTop;
-          const prevScrollHeight = feed.scrollHeight;
-
-          const olderPost = posts[nextPostIndexRef.current];
-          // insert divider at top
-          const firstChild = feed.querySelector('.row, .post-divider');
-          const divider = document.createElement('div');
-          divider.className = 'post-divider';
-          divider.textContent = `${olderPost.body.slice(0, 40)} — ${timeAgo(olderPost.createdAt)}`;
-          if (firstChild) feed.insertBefore(divider, firstChild);
-          else feed.insertBefore(divider, typingRef.current!);
-
-          // fetch and insert comments for older post
-          const cs = await listComments(olderPost.id);
-          // insert so oldest appears above
-          for (let i = cs.length - 1; i >= 0; i--) {
-            const c = cs[i];
-            if (rendered.current.has(c.id)) continue;
-            const node = createRowNode({ id: c.id, authorId: c.authorId, text: c.body, mine: c.authorId === me.id });
-            if (firstChild) feed.insertBefore(node, firstChild);
-            else feed.insertBefore(node, typingRef.current!);
-            rendered.current.add(c.id);
-            await new Promise((r) => setTimeout(r, 160));
-          }
-
-          // restore scroll position
-          const newScrollHeight = feed.scrollHeight;
-          const delta = newScrollHeight - prevScrollHeight;
-          feed.scrollTop = prevScrollTop + delta;
-
-          nextPostIndexRef.current += 1;
-          loadingOlderRef.current = false;
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          await loadOlderBatch();
         }
       }
     }, { root: feed, threshold: 0.1 });
+
     io.observe(sentinel);
     return () => io.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts]);
+  }, [currentIndex, posts, me.id]);
 
   // Send handler: call addComment API (persist) and rely on subscription to pipeline-add the comment
   const handleSend = async (p: { kind: string; body: string }) => {
@@ -845,7 +858,11 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
   .typing-bubble .dot:nth-child(2){ animation-delay: 0.15s; }\
   .typing-bubble .dot:nth-child(3){ animation-delay: 0.3s; }\
   @keyframes elasticBounce{ 0%, 60%, 100%{ transform: translateY(0) scale(1); } 25%{ transform: translateY(-7px) scale(1.15); } }\
-  .post-divider{ text-align:center; color:var(--text-dim); font-size:12px; padding:6px 0; opacity:0.9; }\
+  .post-divider{ display:flex; align-items:center; gap:10px; margin: 8px 0 10px; color:var(--text-dim); }\
+  .post-divider-line{ flex:1; height:1px; background: rgba(255,255,255,0.08); }\
+  .post-divider-content{ display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0; }\
+  .post-divider-title{ font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-dim); }\
+  .post-divider-meta{ font-size:11px; color:var(--text-dim); opacity:0.9; }\
 `}</style>
 
       <SheetHeader className="p-4 border-b">
