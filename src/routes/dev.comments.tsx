@@ -103,7 +103,7 @@ function DevComments() {
     setCount((c) => c + 1);
   }
 
-  // Unified pipeline: every comment (user, other, automated) should go through showTyping -> addComment
+  // Unified pipeline: user and other comments should go through showTyping -> addComment
   async function pipelineAdd({ name, text, mine = false }: { name?: string; text: string; mine?: boolean }) {
     await showTyping(1300 + Math.random() * 800);
     const node = createRowNode({ name, text, mine });
