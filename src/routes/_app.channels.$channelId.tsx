@@ -657,6 +657,7 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
   const feedRef = useRef<HTMLDivElement | null>(null);
   const typingRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const [draft, setDraft] = useState("");
 
   // track rendered comment ids to avoid duplicates
   const rendered = useRef(new Set<string>());
@@ -665,6 +666,15 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
   const currentIndex = posts.findIndex((p) => p.id === post.id);
   const nextPostIndexRef = useRef(currentIndex > 0 ? currentIndex - 1 : -1);
   const loadingOlderRef = useRef(false);
+
+  useEffect(() => {
+    setDraft("");
+    rendered.current.clear();
+    if (feedRef.current) {
+      const staleNodes = feedRef.current.querySelectorAll('.row, .post-divider');
+      staleNodes.forEach((node) => node.remove());
+    }
+  }, [post.id]);
 
   // Avatar colors (locked system)
   const avatarColors = ['#e0637a', '#5b8cff', '#3fb27f', '#c98a3e', '#8a63e0'];
@@ -821,7 +831,10 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
   // Send handler: call addComment API (persist) and rely on subscription to pipeline-add the comment
   const handleSend = async (p: { kind: string; body: string }) => {
     if (p.kind !== 'text') return;
-    await addComment({ postId: post.id, authorId: me.id, body: p.body });
+    const trimmed = p.body.trim();
+    if (!trimmed) return;
+    await addComment({ postId: post.id, authorId: me.id, body: trimmed });
+    setDraft("");
     // schedule an automated reply from another channel member (if available)
     const botId = (channel?.memberIds?.find((id: string) => id !== me.id) ?? me.id) as string;
     setTimeout(async () => {
@@ -883,8 +896,8 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
       </div>
 
       <Composer
-        value={''}
-        onChange={() => {}}
+        value={draft}
+        onChange={(v) => setDraft(v)}
         onSend={handleSend}
         placeholder="Add a comment..."
       />
