@@ -1,6 +1,6 @@
 import { getState, setState, uid, ensureSeed, type Channel, type ChannelPost, type Comment, type JoinRequest } from "@/lib/mockStore";
 import { publish, subscribe } from "@/lib/eventBus";
-import { ensureSupabase } from "@/lib/supabaseClient";
+import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 
 function isFullUrl(value?: string): boolean {
@@ -764,6 +764,72 @@ export async function deleteChannel(channelId: string) {
   }
 }
 
+export async function requestJoinChannel(channelId: string, userId: string) {
+  const supabase = ensureSupabase();
+  try {
+    const { data, error } = await supabase
+      .from("join_requests")
+      .insert([{ channel_id: channelId, user_id: userId, status: "pending", requested_at: new Date().toISOString() }]);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("requestJoinChannel: failed to persist join request, applying locally:", err);
+  }
+
+  setState((s) => {
+    const ch = s.channels.find((c) => c.id === channelId);
+    if (!ch) return;
+    ch.joinRequests = ch.joinRequests ?? [];
+    ch.joinRequests.push({ userId, requestedAt: Date.now(), status: "pending" });
+  });
+  publish("channels:changed");
+}
+
+export async function approveJoinChannelRequest(channelId: string, userId: string) {
+  const supabase = ensureSupabase();
+  try {
+    const { error } = await supabase
+      .from("join_requests")
+      .update({ status: "approved" })
+      .eq("channel_id", channelId)
+      .eq("user_id", userId);
+    if (error) throw error;
+
+    const { error: memError } = await supabase.from("channel_members").insert([{ channel_id: channelId, user_id: userId }]);
+    if (memError) throw memError;
+  } catch (err) {
+    console.warn("approveJoinChannelRequest: supabase failed, applying locally:", err);
+  }
+
+  setState((s) => {
+    const ch = s.channels.find((c) => c.id === channelId);
+    if (!ch) return;
+    ch.memberIds = Array.from(new Set([...(ch.memberIds ?? []), userId]));
+    ch.joinRequests = (ch.joinRequests ?? []).filter((r) => r.userId !== userId);
+  });
+  publish("channels:changed");
+}
+
+export async function rejectJoinChannelRequest(channelId: string, userId: string) {
+  const supabase = ensureSupabase();
+  try {
+    const { error } = await supabase
+      .from("join_requests")
+      .update({ status: "rejected" })
+      .eq("channel_id", channelId)
+      .eq("user_id", userId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("rejectJoinChannelRequest: supabase failed, applying locally:", err);
+  }
+
+  setState((s) => {
+    const ch = s.channels.find((c) => c.id === channelId);
+    if (!ch) return;
+    ch.joinRequests = (ch.joinRequests ?? []).filter((r) => r.userId !== userId);
+  });
+  publish("channels:changed");
+}
+
 export async function addChannelToCommunity(channelId: string, communityId: string) {
   const supabase = ensureSupabase();
   const { error } = await supabase
@@ -1098,15 +1164,19 @@ export async function editPost(postId: string, body: string) {
   }
 }
 
-export async function listComments(postId: string): Promise<Comment[]> {
-  return getState().comments.filter((c) => c.postId === postId).sort((a, b) => a.createdAt - b.createdAt);
+export function likeCount(p: ChannelPost) {
+  return (p.likes?.length ?? 0) + (p.boostedLikes ?? 0);
 }
 
-export async function addComment(input: { postId: string; authorId: string; body: string }) {
-  const c: Comment = { id: uid(), ...input, createdAt: Date.now() };
-  setState((s) => { s.comments.push(c); });
-  publish(`comments:${input.postId}`);
-  return c;
+export function viewCount(p: ChannelPost) {
+  return (p.views?.length ?? 0) + (p.boostedViews ?? 0);
+}
+
+export async function uploadChannelAvatar(channelId: string, file: File): Promise<string> {
+  const path = await uploadImage(file, "channel-media", `${channelId}/avatar`, { maxDim: 256 });
+  const signedUrl = await getImageUrl("channel-media", path);
+  await updateChannel(channelId, { avatar: path });
+  return signedUrl;
 }
 
 export function subscribeToChannels(cb: () => void) {
@@ -1158,139 +1228,148 @@ export function subscribeToChannels(cb: () => void) {
   };
 }
 
-export function subscribeToComments(postId: string, cb: () => void) {
-  return subscribe(`comments:${postId}`, cb);
-}
-
-export function likeCount(p: ChannelPost) {
-  return (p.likes?.length ?? 0) + (p.boostedLikes ?? 0);
-}
-
-export function viewCount(p: ChannelPost) {
-  return (p.views?.length ?? 0) + (p.boostedViews ?? 0);
-}
-
-function isVisibilitySchemaError(error: any) {
-  const message = `${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
-  return message.includes("column") && message.includes("does not exist");
-}
-
-function ensureJoinRequestList(requests?: JoinRequest[]) {
-  return requests?.filter((req) => req.status === "pending") ?? [];
-}
-
-export async function requestJoinChannel(channelId: string, userId: string) {
-  const channel = getState().channels.find((item) => item.id === channelId);
-  if (!channel) throw new Error("Channel not found");
-  if (channel.memberIds.includes(userId)) {
-    throw new Error("You are already subscribed to this channel.");
-  }
-
-  const pending = ensureJoinRequestList(channel.joinRequests).find((req) => req.userId === userId);
-  if (pending) {
-    throw new Error("Your join request is already pending approval.");
-  }
-
+export async function listComments(postId: string): Promise<Comment[]> {
   try {
     const supabase = ensureSupabase();
-    const { data, error } = await supabase
-      .from("join_requests")
-      .insert([{ channel_id: channelId, user_id: userId, requested_at: new Date().toISOString(), status: "pending" }])
+    const { data: rows, error } = await supabase
+      .from("comments")
+      .select("*")
+      .eq("message_id", postId)
+      .eq("status", "approved")
+      .order("created_at", { ascending: true });
+
+    if (!error && rows) {
+      const comments = rows.map(mapCommentRow);
+      setState((s) => {
+        const next = s.comments.filter((c) => c.postId !== postId);
+        next.push(...comments);
+        s.comments = next;
+      });
+      return comments;
+    }
+    if (error) {
+      console.warn("listComments: Supabase comment query failed, trying local fallback:", error);
+    }
+  } catch (error) {
+    console.warn("listComments: failed to load shared comments:", error);
+  }
+
+  return getState().comments.filter((c) => c.postId === postId).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export async function addComment(input: { postId: string; authorId: string; body: string }) {
+  try {
+    const supabase = ensureSupabase();
+    const { data: row, error } = await supabase
+      .from("comments")
+      .insert([
+        {
+          message_id: input.postId,
+          user_id: input.authorId,
+          content: input.body,
+          status: "approved",
+        },
+      ])
       .select()
       .single();
 
-    if (error) {
-      // If conflict or constraint error, surface a friendly message
-      throw new Error(error.message || "Failed to create join request");
-    }
+    if (error || !row) throw new Error(error?.message || "Failed to add comment");
 
-    // Reflect in local state
+    const comment = mapCommentRow(row);
     setState((s) => {
-      const target = s.channels.find((item) => item.id === channelId);
-      if (!target) return;
-      target.joinRequests = [
-        ...(target.joinRequests ?? []),
-        { userId, requestedAt: Date.now(), status: "pending" },
-      ];
+      const exists = s.comments.some((c) => c.id === comment.id);
+      if (!exists) s.comments.push(comment);
     });
-
-    publish("channels:changed");
-  } catch (err) {
-    console.error("Failed to request join via Supabase, falling back to local cache:", err);
-    // Fallback to local state so the UI remains responsive
-    setState((s) => {
-      const target = s.channels.find((item) => item.id === channelId);
-      if (!target) return;
-      target.joinRequests = [
-        ...(target.joinRequests ?? []),
-        { userId, requestedAt: Date.now(), status: "pending" },
-      ];
-    });
-    publish("channels:changed");
+    publish(`comments:${input.postId}`);
+    return comment;
+  } catch (error) {
+    console.error("addComment: failed to persist shared comment. Falling back to local mock state:", error);
+    const fallback: Comment = { id: uid(), ...input, createdAt: Date.now() };
+    setState((s) => { s.comments.push(fallback); });
+    publish(`comments:${input.postId}`);
+    return fallback;
   }
 }
 
-export async function approveJoinChannelRequest(channelId: string, userId: string) {
+export function subscribeToComments(postId: string, cb: () => void) {
+  const eventKey = `comments:${postId}`;
+  if (!supabaseConfigured) {
+    return subscribe(eventKey, cb);
+  }
+
   try {
     const supabase = ensureSupabase();
-    const { data, error } = await supabase.rpc("approve_join_request", { p_channel_id: channelId, p_user_id: userId });
-    if (error) throw error;
+    const channel = supabase.channel(eventKey);
+    channel.on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "comments",
+        filter: `message_id=eq.${postId}`,
+      },
+      async () => {
+        try {
+          await cb();
+        } catch (err) {
+          console.warn("subscribeToComments callback failed:", err);
+        }
+      },
+    );
+    channel.subscribe();
 
-    // Update local cache
-    setState((s) => {
-      const target = s.channels.find((item) => item.id === channelId);
-      if (!target) return;
-      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
-      if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
-    });
-
-    publish("channels:changed");
-  } catch (err) {
-    console.error("Failed to approve join request via RPC:", err);
-    // As a fallback attempt a best-effort local update
-    setState((s) => {
-      const target = s.channels.find((item) => item.id === channelId);
-      if (!target) return;
-      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
-      if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
-    });
-    publish("channels:changed");
+    return () => {
+      try { channel.unsubscribe(); } catch {}
+    };
+  } catch (error) {
+    console.warn("Unable to subscribe to shared comments, using local event fallback:", error);
+    return subscribe(eventKey, cb);
   }
 }
 
-export async function rejectJoinChannelRequest(channelId: string, userId: string) {
+function mapCommentRow(row: any): Comment {
+  return {
+    id: row.id,
+    postId: row.message_id ?? row.post_id,
+    authorId: row.user_id ?? row.author_id,
+    body: row.content ?? row.body,
+    createdAt: new Date(row.created_at).getTime(),
+  };
+}
+
+export function subscribeToPostComments(postId: string, cb: () => void) {
+  return subscribeToComments(postId, cb);
+}
+
+export async function listPostComments(postId: string): Promise<Comment[]> {
+  return listComments(postId);
+}
+
+export async function addPostComment(input: { postId: string; authorId: string; body: string }) {
+  return addComment(input);
+}
+
+export async function deleteComment(commentId: string) {
   try {
     const supabase = ensureSupabase();
-    const { data, error } = await supabase.rpc("reject_join_request", { p_channel_id: channelId, p_user_id: userId });
+    const { error } = await supabase.from("comments").delete().eq("id", commentId);
     if (error) throw error;
-
     setState((s) => {
-      const target = s.channels.find((item) => item.id === channelId);
-      if (!target) return;
-      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
+      s.comments = s.comments.filter((c) => c.id !== commentId);
     });
-
-    publish("channels:changed");
-  } catch (err) {
-    console.error("Failed to reject join request via RPC:", err);
-    setState((s) => {
-      const target = s.channels.find((item) => item.id === channelId);
-      if (!target) return;
-      target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
-    });
-    publish("channels:changed");
+  } catch (error) {
+    console.error("Failed to delete comment:", error);
+    throw error;
   }
 }
 
-
-/**
- * Upload and set a new avatar for a channel.
- * Compresses the file, uploads to `channel-media` bucket, and updates `channels.avatar_url`.
- * Returns the signed URL for immediate display.
- */
-export async function uploadChannelAvatar(channelId: string, file: File): Promise<string> {
-  const path = await uploadImage(file, "channel-media", `${channelId}/avatar`, { maxDim: 256 });
-  const signedUrl = await getImageUrl("channel-media", path);
-  await updateChannel(channelId, { avatar: path });
-  return signedUrl;
+export async function editComment(commentId: string, body: string) {
+  try {
+    const supabase = ensureSupabase();
+    const { error } = await supabase.from("comments").update({ content: body }).eq("id", commentId);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Failed to edit comment:", error);
+    throw error;
+  }
 }
