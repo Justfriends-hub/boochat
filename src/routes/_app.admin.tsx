@@ -13,9 +13,33 @@ import {
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from "@/components/ui/tabs";
-import { BoostControlPanel } from "@/components/admin/BoostControlPanel";
-import { ChannelOverview } from "@/components/admin/ChannelOverview";
-import { CommentApprovalQueue } from "@/components/admin/CommentApprovalQueue";
+import { lazy, Suspense } from "react";
+// Heavy admin panels load on demand when their tab opens (keeps recharts out
+// of the initial admin chunk).
+const BoostControlPanel = lazy(() =>
+  import("@/components/admin/BoostControlPanel").then((m) => ({ default: m.BoostControlPanel })),
+);
+const ChannelOverview = lazy(() =>
+  import("@/components/admin/ChannelOverview").then((m) => ({ default: m.ChannelOverview })),
+);
+const CommentApprovalQueue = lazy(() =>
+  import("@/components/admin/CommentApprovalQueue").then((m) => ({ default: m.CommentApprovalQueue })),
+);
+
+function LazyAdminPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-16" role="status" aria-live="polite">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
+
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from "@/components/ui/table";
@@ -351,21 +375,27 @@ function AdminPage() {
             {/* ─── BOOSTS TAB ─────────────────────────────────────────── */}
             <TabsContent value="boosts">
               <div className="p-2">
-                <BoostControlPanel />
+                <LazyAdminPanel>
+                  <BoostControlPanel />
+                </LazyAdminPanel>
               </div>
             </TabsContent>
 
             {/* ─── ANALYTICS TAB ─────────────────────────────────────── */}
             <TabsContent value="analytics">
               <div className="p-2">
-                <ChannelOverview isSuperAdmin={normalizeRole(me?.role || '') === 'owner'} />
+                <LazyAdminPanel>
+                  <ChannelOverview isSuperAdmin={normalizeRole(me?.role || '') === 'owner'} />
+                </LazyAdminPanel>
               </div>
             </TabsContent>
 
             {/* ─── QUEUE TAB ─────────────────────────────────────────── */}
             <TabsContent value="queue">
               <div className="p-2">
-                <CommentApprovalQueue />
+                <LazyAdminPanel>
+                  <CommentApprovalQueue />
+                </LazyAdminPanel>
               </div>
             </TabsContent>
 

@@ -1,6 +1,6 @@
 import { ensureSupabase, supabase, supabaseConfigured } from "@/lib/supabaseClient";
-import { uploadImage, getImageUrl } from "@/lib/imageUpload";
 import { publish, subscribe } from "@/lib/eventBus";
+import { resolveMedia } from "@/lib/mediaCache";
 import { normalizeRole, type User } from "@/lib/mockStore";
 import { startPresence, stopPresence } from "@/lib/presence";
 
@@ -10,6 +10,41 @@ let initializePromise: Promise<void> | null = null;
 let activePresenceUserId: string | null = null;
 let activePresenceCleanup: (() => void) | null = null;
 let authStateSubscription: { data: { subscription: { unsubscribe: () => void } } } | null = null;
+
+// ── Offline session cache ────────────────────────────────────────────────────
+// Last-known-good profile persisted on-device so a cold start with zero
+// connectivity still enters the app as the signed-in user (Telegram-style).
+// Reads are local-only; any real server call still requires the live token.
+const OFFLINE_USER_KEY = "boochat.offlineUser.v1";
+
+function persistOfflineUser(user: User | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (user) localStorage.setItem(OFFLINE_USER_KEY, JSON.stringify(user));
+    else localStorage.removeItem(OFFLINE_USER_KEY);
+  } catch {}
+}
+
+function loadOfflineUser(): User | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(OFFLINE_USER_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Restore the last-known profile when a network call fails. Returns true if
+ * an offline session was restored; otherwise leaves the user signed out.
+ */
+function restoreOfflineSession(): boolean {
+  cachedUser = loadOfflineUser();
+  authReady = true;
+  publishAuthChange();
+  return !!cachedUser;
+}
 
 function toUser(profile: any, roles: Array<{ role: string }> | null = null): User {
   const roleStr = roles?.[0]?.role ?? profile.role ?? "user";
@@ -41,7 +76,12 @@ async function resolveAvatarUrl(profile: any): Promise<string> {
   const raw: string = profile.avatar_url || "";
   if (!raw) return `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
   try {
-    return await getImageUrl("avatars", raw);
+    // Serve from the device media cache when viewed before; otherwise resolve
+    // via a lazy imageUpload import (keeps the compression chunk off the auth path).
+    return await resolveMedia(async () => {
+      const { getImageUrl } = await import("@/lib/imageUpload");
+      return getImageUrl("avatars", raw);
+    }, raw);
   } catch {
     return `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
   }
@@ -159,15 +199,19 @@ export async function initializeAuth() {
           } else {
             await bindPresence(null);
             cachedUser = null;
+            persistOfflineUser(null);
             publishAuthChange();
           }
         });
       }
     } catch (error) {
       console.warn("Unable to initialize auth:", error);
-      cachedUser = null;
-      authReady = true;
-      publishAuthChange();
+      // Offline: restore the persisted session so the app still opens
+      if (!restoreOfflineSession()) {
+        cachedUser = null;
+        authReady = true;
+        publishAuthChange();
+      }
     }
   })();
   return initializePromise;
@@ -183,8 +227,12 @@ async function refreshCurrentUser(userId: string) {
       .single();
 
     if (profileError || !profile) {
-      cachedUser = null;
-      publishAuthChange();
+      // Network down (or profile unreadable): fall back to the offline session
+      // instead of kicking the user to the login screen.
+      if (!restoreOfflineSession()) {
+        cachedUser = null;
+        publishAuthChange();
+      }
       return;
     }
 
@@ -201,8 +249,12 @@ async function refreshCurrentUser(userId: string) {
       .eq("user_id", userId);
 
     if (rolesError) {
-      cachedUser = null;
-      publishAuthChange();
+      // Roles are non-critical — keep the offline/stale session rather than
+      // signing the user out over a failed lookup.
+      if (!restoreOfflineSession()) {
+        cachedUser = null;
+        publishAuthChange();
+      }
       return;
     }
 
@@ -210,11 +262,15 @@ async function refreshCurrentUser(userId: string) {
     // Resolve storage-path avatars to public URLs asynchronously
     user.avatar = await resolveAvatarUrl(profile);
     cachedUser = user;
+    persistOfflineUser(user);
     publishAuthChange();
   } catch (error) {
     console.warn("Unable to refresh current user:", error);
-    cachedUser = null;
-    publishAuthChange();
+    // Offline / network failure: restore the last-known session if we have one
+    if (!restoreOfflineSession()) {
+      cachedUser = null;
+      publishAuthChange();
+    }
   }
 }
 
@@ -234,6 +290,7 @@ export async function updateProfile(
 
   if (updates.avatarFile) {
     // Compress to 256 × 256 max for avatars, then upload to the public bucket
+    const { uploadImage } = await import("@/lib/imageUpload");
     const path = await uploadImage(updates.avatarFile, "avatars", userId, { maxDim: 256 });
     dbUpdate.avatar_url = path;
   }
@@ -327,6 +384,7 @@ export async function signOut() {
   } finally {
     await bindPresence(null);
     cachedUser = null;
+    persistOfflineUser(null);
     authReady = true;
     publishAuthChange();
   }

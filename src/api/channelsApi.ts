@@ -2,6 +2,7 @@ import { getState, setState, uid, ensureSeed, type Channel, type ChannelPost, ty
 import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
+import { resolveMedia, primeMediaCache } from "@/lib/mediaCache";
 
 function isFullUrl(value?: string): boolean {
   return !!value && /^(https?:\/\/|data:|blob:)/i.test(value);
@@ -61,15 +62,20 @@ async function fetchChannelAdmins(channelIds: string[]) {
 async function resolveChannelAvatars(channels: Channel[]): Promise<Channel[]> {
   const avatarPaths = channels.map((ch) => ch.avatar && !isFullUrl(ch.avatar) ? ch.avatar : undefined);
   const wallpaperPaths = channels.map((ch) => ch.wallpaper && !isFullUrl(ch.wallpaper) ? ch.wallpaper : undefined);
-  
+
   const signedAvatars = await batchGetImageUrls("channel-media", avatarPaths);
   const signedWallpapers = await batchGetImageUrls("channel-media", wallpaperPaths);
-  
-  return channels.map((ch, idx) => ({
+
+  // Serve previously-seen channel art from the device media cache
+  return Promise.all(channels.map(async (ch, idx) => ({
     ...ch,
-    avatar: signedAvatars[idx] ?? ch.avatar,
-    wallpaper: signedWallpapers[idx] ?? ch.wallpaper,
-  }));
+    avatar: avatarPaths[idx] && signedAvatars[idx]
+      ? await resolveMedia(() => Promise.resolve(signedAvatars[idx] as string), avatarPaths[idx])
+      : (signedAvatars[idx] ?? ch.avatar),
+    wallpaper: wallpaperPaths[idx] && signedWallpapers[idx]
+      ? await resolveMedia(() => Promise.resolve(signedWallpapers[idx] as string), wallpaperPaths[idx])
+      : (signedWallpapers[idx] ?? ch.wallpaper),
+  })));
 }
 
 async function fetchChannelMembers(channelIds: string[]) {
@@ -163,10 +169,16 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
       const remoteChannel = mapChannel(channelRow, allMembers, adminIds);
       if (cached?.visibility) remoteChannel.visibility = cached.visibility;
       if (!isFullUrl(remoteChannel.avatar)) {
-        remoteChannel.avatar = await getImageUrl("channel-media", remoteChannel.avatar);
+        remoteChannel.avatar = await resolveMedia(
+          () => getImageUrl("channel-media", remoteChannel.avatar as string),
+          remoteChannel.avatar,
+        );
       }
       if (remoteChannel.wallpaper && !isFullUrl(remoteChannel.wallpaper)) {
-        remoteChannel.wallpaper = await getImageUrl("channel-media", remoteChannel.wallpaper);
+        remoteChannel.wallpaper = await resolveMedia(
+          () => getImageUrl("channel-media", remoteChannel.wallpaper as string),
+          remoteChannel.wallpaper,
+        );
       }
       setState((s) => {
         const idx = s.channels.findIndex((c) => c.id === id);
@@ -221,7 +233,7 @@ export async function createChannel(input: { name: string; description: string; 
 
   const ch = mapChannel({ ...channelRow, visibility }, [input.ownerId], [input.ownerId]);
   if (!isFullUrl(ch.avatar)) {
-    ch.avatar = await getImageUrl("channel-media", ch.avatar);
+    ch.avatar = await resolveMedia(() => getImageUrl("channel-media", ch.avatar as string), ch.avatar);
   }
   setState((s) => {
     const existing = s.channels.find((c) => c.id === ch.id);
@@ -300,7 +312,7 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
   }
 
   if (updates.avatar !== undefined && !isFullUrl(updates.avatar)) {
-    const resolvedAvatar = await getImageUrl("channel-media", updates.avatar);
+    const resolvedAvatar = await resolveMedia(() => getImageUrl("channel-media", updates.avatar as string), updates.avatar);
     setState((s) => {
       const channel = s.channels.find((c) => c.id === id);
       if (channel) channel.avatar = resolvedAvatar;
@@ -308,7 +320,7 @@ export async function updateChannel(id: string, updates: { onlyAdminsPost?: bool
   }
 
   if (updates.wallpaper !== undefined && updates.wallpaper !== null && !isFullUrl(updates.wallpaper)) {
-    const resolvedWallpaper = await getImageUrl("channel-media", updates.wallpaper);
+    const resolvedWallpaper = await resolveMedia(() => getImageUrl("channel-media", updates.wallpaper as string), updates.wallpaper);
     setState((s) => {
       const channel = s.channels.find((c) => c.id === id);
       if (channel) channel.wallpaper = resolvedWallpaper;
@@ -877,13 +889,16 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
       }));
       console.log("🗺️  [listPosts] Mapped posts:", mappedPosts.length);
 
-      // Batch-resolve image_url storage paths to signed URLs
+      // Batch-resolve image_url storage paths to signed URLs, serving
+      // previously-seen post images straight from the device cache.
       const imagePaths = mappedPosts.map((p) => p.image ?? null);
       const imageUrls = await batchGetImageUrls("channel-media", imagePaths);
-      const resolved = mappedPosts.map((p, i) => ({
+      const resolved = await Promise.all(mappedPosts.map(async (p, i) => ({
         ...p,
-        image: imageUrls[i] ?? p.image,
-      }));
+        image: imagePaths[i] && imageUrls[i]
+          ? await resolveMedia(() => Promise.resolve(imageUrls[i] as string), imagePaths[i])
+          : (imageUrls[i] ?? p.image),
+      })));
       return resolved;
     }
 
@@ -922,7 +937,9 @@ export async function getPost(id: string): Promise<ChannelPost | undefined> {
         .eq("emoji", "❤️");
 
       const rawImageUrl: string | undefined = post.image_url;
-      const image = rawImageUrl ? await getImageUrl("channel-media", rawImageUrl) : undefined;
+      const image = rawImageUrl
+        ? await resolveMedia(() => getImageUrl("channel-media", rawImageUrl), rawImageUrl)
+        : undefined;
 
       return {
         id: post.id,
@@ -1037,8 +1054,11 @@ export async function createPost(input: {
 
     if (error || !post) throw new Error(error?.message || "Failed to create post");
 
-    // Resolve the stored path to a signed URL for immediate display
-    const displayImage = imageUrl ? await getImageUrl("channel-media", imageUrl) : undefined;
+    // Resolve the stored path to a signed URL for immediate display,
+    // caching it on-device so the author (and viewers) replay it locally.
+    const displayImage = imageUrl
+      ? await resolveMedia(() => getImageUrl("channel-media", imageUrl), imageUrl)
+      : undefined;
 
     const mappedPost: ChannelPost = {
       id: post.id,
@@ -1160,6 +1180,8 @@ export function viewCount(p: ChannelPost) {
 export async function uploadChannelAvatar(channelId: string, file: File): Promise<string> {
   const path = await uploadImage(file, "channel-media", `${channelId}/avatar`, { maxDim: 256 });
   const signedUrl = await getImageUrl("channel-media", path);
+  // The uploader already has the bytes — store them so future views are free
+  await primeMediaCache(signedUrl, path);
   await updateChannel(channelId, { avatar: path });
   return signedUrl;
 }

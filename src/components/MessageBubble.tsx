@@ -107,7 +107,7 @@ export function MessageBubble({
             {deleted ? (
               <p className="italic opacity-70">This message was deleted</p>
             ) : m.kind === "image" ? (
-              <img src={m.body} alt="" className="max-h-72 rounded-lg" />
+              <img src={m.body} alt="" loading="lazy" decoding="async" className="max-h-72 rounded-lg" />
             ) : m.kind === "voice" ? (
               <div className="flex flex-col gap-2 py-1">
                 <audio controls src={m.body} className="w-full rounded-lg bg-black/5" />

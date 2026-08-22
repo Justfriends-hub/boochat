@@ -161,7 +161,7 @@ function JoinPreviewPage() {
 
                 {latestMedia ? (
                   <div className="overflow-hidden rounded-2xl border border-white/10 bg-background/60">
-                    <img src={latestMedia} alt="Latest preview media" className="h-56 w-full object-cover" />
+                    <img src={latestMedia} alt="Latest preview media" loading="lazy" decoding="async" className="h-56 w-full object-cover" />
                   </div>
                 ) : null}
 

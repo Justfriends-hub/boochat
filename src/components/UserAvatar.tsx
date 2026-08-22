@@ -8,7 +8,7 @@ export function UserAvatar({
   return (
     <div className={cn("relative shrink-0", className)} style={{ width: size, height: size }}>
       <Avatar style={{ width: size, height: size }}>
-        <AvatarImage src={src} alt={name} />
+        <AvatarImage src={src} alt={name} loading="lazy" decoding="async" />
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
       {online && (

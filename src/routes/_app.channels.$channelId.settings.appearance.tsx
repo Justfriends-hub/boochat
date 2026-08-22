@@ -136,7 +136,7 @@ function AppearancePage() {
 
           {channel.wallpaper && (
             <div className="rounded-lg overflow-hidden border">
-              <img src={channel.wallpaper} alt="Channel wallpaper" className="w-full h-40 object-cover" />
+              <img src={channel.wallpaper} alt="Channel wallpaper" loading="lazy" decoding="async" className="w-full h-40 object-cover" />
             </div>
           )}
 

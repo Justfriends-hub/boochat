@@ -349,6 +349,7 @@ export function StoryViewer({
                 key={current.id}
                 src={current.media}
                 alt={current.caption || `Story by ${user?.displayName ?? "user"}`}
+                fetchPriority="high"
                 onLoad={() => setMediaReady(true)}
                 onError={() => setMediaReady(true)}
                 className="h-full w-full object-cover"

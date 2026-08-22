@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
@@ -61,6 +61,30 @@ function ChatsPage() {
       listMessages(c.id).catch(() => {});
     });
   }, [me, chats]);
+
+  // Warm the most recent conversation's route chunk during idle time so the
+  // first tap into a chat feels instant (mobile has no hover to preload).
+  const router = useRouter();
+  useEffect(() => {
+    if (!chats.length) return;
+    let cancelled = false;
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: () => void) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const run = () => {
+      if (cancelled) return;
+      void router
+        .preloadRoute({ to: "/chats/$chatId", params: { chatId: chats[0].id } })
+        .catch(() => {});
+    };
+    const id = w.requestIdleCallback ? w.requestIdleCallback(run) : window.setTimeout(run, 1000);
+    return () => {
+      cancelled = true;
+      if (w.requestIdleCallback && w.cancelIdleCallback) w.cancelIdleCallback(id);
+      else clearTimeout(id);
+    };
+  }, [chats, router]);
 
   if (!me) {
     return (

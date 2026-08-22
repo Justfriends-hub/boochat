@@ -9,6 +9,9 @@ export const getRouter = () => {
     routeTree,
     context: { queryClient },
     scrollRestoration: true,
+    // Preload route chunks (and loaders) when a link is hovered/focused —
+    // makes tab-to-tab navigation feel instant.
+    defaultPreload: "intent",
     defaultPreloadStaleTime: 0,
   });
 

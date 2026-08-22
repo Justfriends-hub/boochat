@@ -2,6 +2,7 @@ import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import { getState, setState, normalizeRole, type User } from "@/lib/mockStore";
 import { getImageUrl, batchGetImageUrls } from "@/lib/imageUpload";
+import { resolveMedia } from "@/lib/mediaCache";
 
 /**
  * Batch-resolves storage-path avatars to signed URLs using the batch API.
@@ -23,14 +24,17 @@ async function resolveBatchAvatarUrls(profiles: any[]): Promise<User[]> {
     }
   });
 
-  // Batch sign all storage paths
+  // Batch sign all storage paths, serving previously-seen avatars from the
+  // device media cache (zero data on repeat loads)
   if (toSign.length > 0) {
     const paths = toSign.map((t) => t.path);
     const signedUrls = await batchGetImageUrls("avatars", paths);
 
-    toSign.forEach((item, signedIdx) => {
-      result[item.idx].avatar = signedUrls[signedIdx] || result[item.idx].avatar;
-    });
+    await Promise.all(toSign.map(async (item, signedIdx) => {
+      const url = signedUrls[signedIdx];
+      if (!url) return;
+      result[item.idx].avatar = await resolveMedia(() => Promise.resolve(url), item.path);
+    }));
   }
 
   return result;
@@ -61,10 +65,13 @@ function mapProfileSync(profile: any): User {
 
 async function mapProfileAsync(profile: any): Promise<User> {
   const base = mapProfileSync(profile);
-  // If avatar was a storage path, resolve it now
+  // If avatar was a storage path, resolve it now (device-cached when seen before)
   if (base.avatar && !/^https?:\/\//i.test(base.avatar)) {
     try {
-      base.avatar = await getImageUrl("avatars", profile.avatar_url);
+      base.avatar = await resolveMedia(
+        () => getImageUrl("avatars", profile.avatar_url),
+        profile.avatar_url,
+      );
     } catch {
       const fallback = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
       base.avatar = fallback;

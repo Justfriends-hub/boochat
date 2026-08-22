@@ -12,6 +12,27 @@ import {
 } from "@/lib/offlineStore";
 import { publish } from "@/lib/eventBus";
 import { useSyncStore } from "@/stores/syncStore";
+import { resolveMedia, getCachedMediaObjectUrl } from "@/lib/mediaCache";
+
+/**
+ * Re-points cached image/voice bodies at device-local blob URLs so previously
+ * viewed media still renders after an offline reload (stored blob:/signed URLs
+ * go stale, but the bytes are on disk keyed by imagePath).
+ */
+async function hydrateLocalMedia(chatId: string): Promise<Message[]> {
+  const cached = getCachedMessages(chatId);
+  if (!cached.length) return cached;
+  const next = await Promise.all(
+    cached.map(async (m) => {
+      if ((m.kind === "image" || m.kind === "voice") && m.imagePath) {
+        const url = await getCachedMediaObjectUrl(m.imagePath);
+        if (url && url !== m.body) return { ...m, body: url };
+      }
+      return m;
+    }),
+  );
+  return next;
+}
 
 function mapMessage(row: any): Message {
   const createdAt = new Date(row.created_at).getTime();
@@ -66,15 +87,19 @@ export async function listMessages(chatId: string): Promise<Message[]> {
       if (!error && data) {
         const remoteMsgs = data.map(mapMessage);
 
-        // Batch-resolve storage paths to signed URLs for image and voice playback
+        // Batch-resolve storage paths to signed URLs for image and voice playback,
+        // then serve each item from the device media cache when previously viewed —
+        // repeat views cost zero network bandwidth (fully offline-capable).
         const mediaPaths = remoteMsgs.map((m) => m.imagePath ?? null);
         const mediaUrls = await batchGetImageUrls("chat-media", mediaPaths);
-        const resolved = remoteMsgs.map((m, i) => {
-          if ((m.kind === "image" || m.kind === "voice") && mediaUrls[i]) {
-            return { ...m, body: mediaUrls[i] as string };
-          }
-          return m;
-        });
+        const resolved = await Promise.all(
+          remoteMsgs.map(async (m, i) => {
+            if ((m.kind === "image" || m.kind === "voice") && mediaPaths[i] && mediaUrls[i]) {
+              return { ...m, body: await resolveMedia(() => Promise.resolve(mediaUrls[i] as string), mediaPaths[i]) };
+            }
+            return m;
+          }),
+        );
 
         setCachedMessages(chatId, resolved);
         return getCachedMessages(chatId);
@@ -84,7 +109,8 @@ export async function listMessages(chatId: string): Promise<Message[]> {
     }
   }
 
-  return cached;
+  // Offline (or network failed): replay media from the device cache if viewed before
+  return hydrateLocalMedia(chatId);
 }
 
 // Optimistic & Offline-first Message Dispatch

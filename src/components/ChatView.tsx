@@ -423,7 +423,7 @@ export function ChatView({ chatId }: { chatId: string }) {
             <div className="space-y-5 p-4">
               <div className="rounded-3xl overflow-hidden bg-muted">
                 {chat.avatar ? (
-                  <img src={chat.avatar} alt="Group wallpaper" className="w-full h-56 object-cover" />
+                  <img src={chat.avatar} alt="Group wallpaper" loading="lazy" decoding="async" className="w-full h-56 object-cover" />
                 ) : (
                   <div className="flex h-56 items-center justify-center bg-slate-200 text-muted-foreground">No wallpaper</div>
                 )}

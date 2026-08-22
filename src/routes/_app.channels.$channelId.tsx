@@ -352,7 +352,7 @@ function ChannelPage() {
                 </div>
               </header>
               <p className="whitespace-pre-wrap text-sm">{p.body}</p>
-              {p.image && <img src={p.image} alt="" className="mt-2 max-h-80 w-full rounded-xl object-cover" />}
+              {p.image && <img src={p.image} alt="" loading="lazy" decoding="async" className="mt-2 max-h-80 w-full rounded-xl object-cover" />}
               <footer className="mt-3 flex items-center gap-4 text-sm text-muted-foreground pt-1 border-t">
                 <button onClick={() => doLike(p)} className="flex items-center gap-1.5 hover:text-foreground font-medium">
                   <Heart className={(p.likes ?? []).includes(me.id) ? "h-4 w-4 fill-red-500 text-red-500" : "h-4 w-4"} />
@@ -436,7 +436,7 @@ function ChannelPage() {
                 {/* Wallpaper/Avatar Section */}
                 <div className="space-y-3">
                   <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-muted">
-                    {channel.avatar && <img src={channel.avatar} alt="" className="w-full h-full object-cover" />}
+                    {channel.avatar && <img src={channel.avatar} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />}
                   </div>
                   {isOwner && (
                     <Button

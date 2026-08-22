@@ -2,6 +2,7 @@ import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import { getState, setState, uid, type Status } from "@/lib/mockStore";
 import { useUIStore } from "@/stores/uiStore";
+import { resolveMedia, primeMediaCache } from "@/lib/mediaCache";
 
 const STATUS_BUCKET = "status-media";
 
@@ -43,23 +44,13 @@ function setCachedSignedUrl(path: string, url: string, expiresAt: number) {
   saveSignedUrlCache(cache);
 }
 
+/**
+ * Store a just-viewed story on the device so the next open replays locally
+ * with zero mobile-data usage (keyed by its stable storage path).
+ */
 async function cacheViewedStatusMedia(status: Status) {
-  if (typeof window === "undefined" || !status?.media || status.media.startsWith("data:")) return;
-  if (!("caches" in window)) return;
-
-  try {
-    const cache = await caches.open("boochat-status-media");
-    const request = new Request(status.media, { mode: "cors" });
-    const existing = await cache.match(request);
-    if (existing) return;
-
-    const response = await fetch(request, { cache: "force-cache" });
-    if (response.ok) {
-      await cache.put(request, response.clone());
-    }
-  } catch {
-    // best-effort only
-  }
+  if (typeof window === "undefined" || !status?.media) return;
+  await primeMediaCache(status.media, status.storagePath ?? undefined);
 }
 
 export function isExpired(s: Status) {
@@ -229,7 +220,14 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
       const statuses = rows.map((row: any) => ({ ...mapStatus(row), media: row.media_url }));
       const mediaUrls = statuses.map((s) => s.media);
       const signedUrls = await batchGetMediaUrls(mediaUrls);
-      const signedStatuses = statuses.map((status, idx) => ({ ...status, media: signedUrls[idx] }));
+      // Serve previously-viewed stories from the device cache (zero data);
+      // first view downloads once and is stored for offline replay.
+      const resolvedStatuses = await Promise.all(
+        statuses.map(async (status, idx) => ({
+          ...status,
+          media: await resolveMedia(() => Promise.resolve(signedUrls[idx]), status.storagePath),
+        })),
+      );
 
       setState((s) => {
         // Merge: keep existing local entries (preserve viewedBy if already present),
@@ -238,7 +236,7 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
         // seed with current local (non-expired)
         s.statuses.filter((st) => !isExpired(st)).forEach((st) => byId.set(st.id, st));
         // overlay new/synced statuses
-        signedStatuses.forEach((st) => {
+        resolvedStatuses.forEach((st) => {
           const existing = byId.get(st.id);
           if (!existing) byId.set(st.id, st);
           else {
@@ -342,7 +340,7 @@ export async function createStatus(input: {
         .single();
 
       if (!error && data) {
-        const media = await getMediaUrl(path);
+        const media = await resolveMedia(() => getMediaUrl(path), path);
         const mapped = {
           ...mapStatus({ ...data, media_url: path, media }),
           media,

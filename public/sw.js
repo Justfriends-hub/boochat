@@ -2,29 +2,68 @@
  * Meshly Service Worker — Offline-first PWA
  *
  * Strategy:
- *   • Navigation requests    → NetworkFirst (try network, fall back to shell)
+ *   • App install            → precache shell ("/", manifest) + every entry
+ *                              asset referenced by the shell HTML (JS/CSS)
+ *   • Navigation requests    → CACHE-FIRST with background refresh: the app
+ *                              opens instantly from the device even with zero
+ *                              connectivity; a fresh shell is downloaded
+ *                              silently for the next load.
  *   • Hashed JS/CSS/fonts    → CacheFirst (assets never change once hashed)
- *   • Images & media         → StaleWhileRevalidate (show cached, refresh in bg)
- *   • Supabase / API calls   → NetworkOnly (never cache live data in SW)
+ *   • Images & media         → StaleWhileRevalidate (show cached, refresh bg)
+ *   • Supabase / API calls   → NetworkOnly (never intercepted; signed media
+ *                              URLs are handled by the app's own media cache)
  *
- * Cache versioning: bump SHELL_CACHE when you want to force-evict old caches.
+ * Cache versioning: bump SHELL_CACHE / ASSET_CACHE together to force-evict.
  */
-const SHELL_CACHE = "meshly-shell-v3";
-const ASSET_CACHE = "meshly-assets-v3";
+const SHELL_CACHE = "meshly-shell-v4";
+const ASSET_CACHE = "meshly-assets-v4";
 const IMAGE_CACHE = "meshly-images-v1";
 
 const APP_SHELL = ["/", "/manifest.webmanifest"];
 
-// ── Install: pre-cache the app shell ──────────────────────────────────────
+// ── Install: pre-cache the shell + entry assets ───────────────────────────
 self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches
-      .open(SHELL_CACHE)
-      .then((c) => c.addAll(APP_SHELL))
-      .catch(() => {})
-      .then(() => self.skipWaiting()),
-  );
+  e.waitUntil(precacheShellAndEntryAssets().then(() => self.skipWaiting()));
 });
+
+/**
+ * Caches the SPA shell, then parses the served HTML for its hashed entry
+ * chunks (/assets/*.js|css) and precaches those too — so the first offline
+ * start doesn't need the network for the core bundle.
+ */
+async function precacheShellAndEntryAssets() {
+  try {
+    const shellCache = await caches.open(SHELL_CACHE);
+    await shellCache.addAll(APP_SHELL).catch(() => {});
+
+    let html = "";
+    const cachedShell = await shellCache.match("/");
+    if (cachedShell) {
+      html = await cachedShell.text();
+    } else {
+      const res = await fetch("/", { cache: "no-store" });
+      if (!res || !res.ok) return;
+      html = await res.text();
+      await shellCache.put("/", res.clone()).catch(() => {});
+    }
+
+    const assetUrls = new Set();
+    const re = /(?:src|href)="(\/assets\/[^"]+\.(?:js|css))"/g;
+    let match;
+    while ((match = re.exec(html)) !== null) assetUrls.add(match[1]);
+
+    if (assetUrls.size > 0) {
+      const assetCache = await caches.open(ASSET_CACHE);
+      await Promise.all(
+        Array.from(assetUrls).map((u) =>
+          assetCache.add(new Request(u, { cache: "reload" })).catch(() => {}),
+        ),
+      );
+    }
+  } catch {
+    // best-effort — runtime caching covers whatever we missed
+  }
+}
 
 // ── Activate: clean up old caches ─────────────────────────────────────────
 self.addEventListener("activate", (e) => {
@@ -90,22 +129,35 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // ── 3. Navigation (page loads) → NetworkFirst with shell fallback ─────
+  // ── 3. Navigation (page loads) → CACHE-FIRST + background refresh ────
+  // The shell is canonical: every SPA route renders from the same document,
+  // so we persist it under "/" and fall back to it for deep links.
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          if (res.ok) {
-            caches.open(SHELL_CACHE).then((c) => c.put(req, res.clone())).catch(() => {});
-          }
-          return res;
-        })
-        .catch(async () => {
-          const cached = await caches.match(req);
-          if (cached) return cached;
-          // Fall back to the app shell so the SPA can handle routing
-          return caches.match("/") ?? Response.error();
-        }),
+      (async () => {
+        const cache = await caches.open(SHELL_CACHE);
+        const cached =
+          (await cache.match("/")) ||
+          (await cache.match(req, { ignoreSearch: true }));
+
+        const networkUpdate = fetch(req)
+          .then((res) => {
+            if (res && res.ok) {
+              // Always store under the canonical "/" key
+              cache.put("/", res.clone()).catch(() => {});
+            }
+            return res;
+          })
+          .catch(() => null);
+
+        if (cached) {
+          event.waitUntil(networkUpdate);
+          return cached;
+        }
+
+        const fresh = await networkUpdate;
+        return fresh || (await cache.match("/")) || Response.error();
+      })(),
     );
     return;
   }

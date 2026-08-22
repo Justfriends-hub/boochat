@@ -17,6 +17,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { InstallPromptBanner } from "@/components/InstallPromptBanner";
 import { initOfflineStore, getAppState, setAppState } from "@/lib/offlineStore";
+import { pruneMediaCache } from "@/lib/mediaCache";
 
 function NotFoundComponent() {
   return (
@@ -151,6 +152,7 @@ function RootComponent() {
   useEffect(() => {
     initStore();
     initOfflineStore().catch(console.warn);
+    pruneMediaCache().catch(() => {});
   }, []);
 
   // Register service worker (production only, never in preview/iframe/dev)

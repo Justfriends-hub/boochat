@@ -138,6 +138,8 @@ function StatusPage() {
                     <img
                       src={my[0].media}
                       alt="status preview"
+                      loading="lazy"
+                      decoding="async"
                       className="h-full w-full object-cover"
                     />
                   </div>
@@ -217,7 +219,7 @@ function StatusList({ groups, users, onOpen }: { groups: Array<{ userId: string;
                 </div>
                 {group.latest?.media && (
                   <span className="absolute -inset-0.5 rounded-full overflow-hidden" style={{ width: 48, height: 48 }}>
-                    <img src={group.latest.media} alt="status preview" className="w-full h-full object-cover opacity-75" />
+                    <img src={group.latest.media} alt="status preview" loading="lazy" decoding="async" className="w-full h-full object-cover opacity-75" />
                     <span className="absolute inset-0 rounded-full ring-2 ring-primary pointer-events-none" />
                   </span>
                 )}
