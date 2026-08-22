@@ -169,3 +169,37 @@ export async function getAppState<T = unknown>(key: string): Promise<T | undefin
     return undefined;
   }
 }
+
+// ── Durable list mirror (offline backup for chats/channels/users/posts) ───
+// localStorage snapshots can be evicted or wiped; IndexedDB is far more
+// durable. Successful online fetches mirror their results here, and offline
+// starts hydrate the in-memory store from this backup.
+
+export type SavedListKey = "users" | "chats" | "channels" | "channelPosts" | "statuses";
+
+/** Mirror a successfully fetched list into IndexedDB. */
+export function saveList<T>(key: SavedListKey, items: T[]): void {
+  if (!items || items.length === 0) return;
+  void setAppState(`list:${key}`, items);
+}
+
+/**
+ * Offline read helper: returns the in-memory list if populated, otherwise
+ * hydrates it from the IndexedDB mirror (once) and returns that.
+ */
+export async function getOfflineList<T>(
+  memory: () => T[],
+  key: SavedListKey,
+  hydrate: (items: T[]) => void,
+): Promise<T[]> {
+  const local = memory();
+  if (local.length > 0) return local;
+  try {
+    const saved = await getAppState<T[]>(`list:${key}`);
+    if (saved && saved.length > 0) {
+      hydrate(saved);
+      return saved;
+    }
+  } catch {}
+  return local;
+}

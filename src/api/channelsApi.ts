@@ -3,6 +3,8 @@ import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 import { resolveMedia, primeMediaCache } from "@/lib/mediaCache";
+import { getOfflineList, saveList } from "@/lib/offlineStore";
+import { hydrateLists } from "@/lib/mockStore";
 
 function isFullUrl(value?: string): boolean {
   return !!value && /^(https?:\/\/|data:|blob:)/i.test(value);
@@ -100,7 +102,11 @@ async function fetchChannelMembers(channelIds: string[]) {
 export async function listChannels(): Promise<Channel[]> {
   ensureSeed(); // Ensure seed data is available as fallback
   if (typeof window !== "undefined" && !navigator.onLine) {
-    return getState().channels;
+    return getOfflineList(
+      () => getState().channels,
+      "channels",
+      (items) => hydrateLists({ channels: items }),
+    );
   }
   try {
     const supabase = ensureSupabase();
@@ -130,6 +136,7 @@ export async function listChannels(): Promise<Channel[]> {
 
       remoteChannels = await resolveChannelAvatars(remoteChannels);
       setState((s) => { s.channels = remoteChannels; });
+      saveList("channels", remoteChannels);
       return remoteChannels;
     }
 
@@ -147,7 +154,12 @@ export async function listChannels(): Promise<Channel[]> {
 export async function getChannel(id: string): Promise<Channel | undefined> {
   ensureSeed(); // Ensure seed data is available as fallback
   if (typeof window !== "undefined" && !navigator.onLine) {
-    return getState().channels.find((c) => c.id === id);
+    const local = await getOfflineList(
+      () => getState().channels,
+      "channels",
+      (items) => hydrateLists({ channels: items }),
+    );
+    return local.find((c) => c.id === id);
   }
   try {
     const supabase = ensureSupabase();
@@ -870,9 +882,13 @@ export async function addChannelToCommunity(channelId: string, communityId: stri
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
   ensureSeed(); // Ensure seed data is available as fallback
 
-  // Offline: serve cached/seeded posts immediately
+  // Offline: serve the durable local snapshot immediately
   if (typeof window !== "undefined" && !navigator.onLine) {
-    const all = getState().channelPosts;
+    const all = await getOfflineList(
+      () => getState().channelPosts,
+      "channelPosts",
+      (items) => hydrateLists({ channelPosts: items }),
+    );
     const local = channelId ? all.filter((p) => p.channelId === channelId) : [...all];
     return local.sort((a, b) => b.createdAt - a.createdAt);
   }
@@ -912,6 +928,7 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
           ? await resolveMedia(() => Promise.resolve(imageUrls[i] as string), imagePaths[i])
           : (imageUrls[i] ?? p.image),
       })));
+      saveList("channelPosts", resolved);
       return resolved;
     }
 

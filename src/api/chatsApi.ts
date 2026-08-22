@@ -1,6 +1,7 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
-import { getState, setState, type Chat, type JoinRequest } from "@/lib/mockStore";
+import { getState, setState, hydrateLists, type Chat, type JoinRequest } from "@/lib/mockStore";
+import { getOfflineList, saveList } from "@/lib/offlineStore";
 
 function mapChat(chat: any, members: string[], group: any | null): Chat {
   const visibility = chat.visibility ?? (chat.is_public === false ? "private" : "public");
@@ -56,9 +57,13 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
-  // Offline: serve the cached snapshot immediately — no network wait
+  // Offline: serve the durable local snapshot immediately — no network wait
   if (typeof window !== "undefined" && !navigator.onLine) {
-    return getState().chats;
+    return getOfflineList(
+      () => getState().chats,
+      "chats",
+      (items) => hydrateLists({ chats: items }),
+    );
   }
   try {
     const supabase = ensureSupabase();
@@ -92,6 +97,7 @@ export async function listChats(userId: string): Promise<Chat[]> {
           });
 
           setState((s) => { s.chats = remoteChats; });
+          saveList("chats", remoteChats);
           return remoteChats;
         }
       }
@@ -103,8 +109,14 @@ export async function listChats(userId: string): Promise<Chat[]> {
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
+  // Offline: serve the durable local snapshot immediately
   if (typeof window !== "undefined" && !navigator.onLine) {
-    return getState().chats.find((c) => c.id === id);
+    const local = await getOfflineList(
+      () => getState().chats,
+      "chats",
+      (items) => hydrateLists({ chats: items }),
+    );
+    return local.find((c) => c.id === id);
   }
   try {
     const supabase = ensureSupabase();

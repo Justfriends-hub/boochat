@@ -288,6 +288,31 @@ export function resetStore() {
   save();
 }
 
+/**
+ * Merge saved lists into the in-memory store — only fills sections that are
+ * currently empty, so fresher live data always wins.
+ */
+export function hydrateLists(lists: {
+  users?: User[];
+  chats?: Chat[];
+  channels?: Channel[];
+  channelPosts?: ChannelPost[];
+  statuses?: Status[];
+}) {
+  if (typeof window === "undefined") return;
+  const hasAny = Object.values(lists).some((v) => v && v.length > 0);
+  if (!hasAny) return;
+  setState((s) => {
+    if (!s.users.length && lists.users?.length) s.users = lists.users;
+    if (!s.chats.length && lists.chats?.length) s.chats = lists.chats;
+    if (!s.channels.length && lists.channels?.length) s.channels = lists.channels;
+    if (!s.channelPosts.length && lists.channelPosts?.length) s.channelPosts = lists.channelPosts;
+    if (!s.statuses.length && lists.statuses?.length) {
+      s.statuses = lists.statuses.filter((st) => Date.now() - st.createdAt < 24 * 60 * 60 * 1000);
+    }
+  });
+}
+
 // Function declaration (hoisted) so the circular import from ./seed is safe.
 export function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);

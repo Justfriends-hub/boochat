@@ -1,8 +1,9 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
-import { getState, setState, uid, type Status } from "@/lib/mockStore";
+import { getState, setState, hydrateLists, uid, type Status } from "@/lib/mockStore";
 import { useUIStore } from "@/stores/uiStore";
 import { resolveMedia, primeMediaCache, getCachedMediaObjectUrl } from "@/lib/mediaCache";
+import { getOfflineList, saveList } from "@/lib/offlineStore";
 
 const STATUS_BUCKET = "status-media";
 
@@ -156,9 +157,11 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
   // Offline: replay everything from the device instantly — including media,
   // re-attached from the on-device cache so stories/photos play with no network.
   if (typeof window !== "undefined" && !navigator.onLine) {
-    const local = getState().statuses
-      .filter((s) => !isExpired(s))
-      .sort((a, b) => b.createdAt - a.createdAt);
+    const local = await getOfflineList(
+      () => getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt),
+      "statuses",
+      (items) => hydrateLists({ statuses: items }),
+    );
     const withMedia = await Promise.all(
       local.map(async (st) => ({
         ...st,
@@ -271,6 +274,7 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
     }
 
     const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
+    saveList("statuses", all);
     if (!viewerId) return all;
     return all.filter((st) => isVisibleTo(st, viewerId));
   } catch (err) {

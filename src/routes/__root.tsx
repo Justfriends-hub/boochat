@@ -12,7 +12,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { initStore } from "@/lib/mockStore";
+import { initStore, hydrateLists, type User, type Chat, type Channel, type ChannelPost, type Status } from "@/lib/mockStore";
 import { useTheme } from "@/hooks/useTheme";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { InstallPromptBanner } from "@/components/InstallPromptBanner";
@@ -151,7 +151,20 @@ function RootComponent() {
   // Initialize mock store + offline IndexedDB cache
   useEffect(() => {
     initStore();
-    initOfflineStore().catch(console.warn);
+    // Warm the in-memory store from the durable IndexedDB list mirror so
+    // offline cold starts render chats/channels/users instantly.
+    initOfflineStore()
+      .then(async () => {
+        const [users, chats, channels, channelPosts, statuses] = await Promise.all([
+          getAppState<User[]>("list:users"),
+          getAppState<Chat[]>("list:chats"),
+          getAppState<Channel[]>("list:channels"),
+          getAppState<ChannelPost[]>("list:channelPosts"),
+          getAppState<Status[]>("list:statuses"),
+        ]);
+        hydrateLists({ users, chats, channels, channelPosts, statuses });
+      })
+      .catch(console.warn);
     pruneMediaCache().catch(() => {});
   }, []);
 

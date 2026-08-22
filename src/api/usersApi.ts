@@ -1,8 +1,9 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
-import { getState, setState, normalizeRole, type User } from "@/lib/mockStore";
+import { getState, setState, hydrateLists, normalizeRole, type User } from "@/lib/mockStore";
 import { getImageUrl, batchGetImageUrls } from "@/lib/imageUpload";
 import { resolveMedia } from "@/lib/mediaCache";
+import { getOfflineList, saveList } from "@/lib/offlineStore";
 
 /**
  * Batch-resolves storage-path avatars to signed URLs using the batch API.
@@ -81,9 +82,13 @@ async function mapProfileAsync(profile: any): Promise<User> {
 }
 
 export async function listUsers(): Promise<User[]> {
-  // Offline: cached snapshot immediately
+  // Offline: durable local snapshot immediately
   if (typeof window !== "undefined" && !navigator.onLine) {
-    return getState().users;
+    return getOfflineList(
+      () => getState().users,
+      "users",
+      (items) => hydrateLists({ users: items }),
+    );
   }
   try {
     const supabase = ensureSupabase();
@@ -112,6 +117,7 @@ export async function listUsers(): Promise<User[]> {
       // First pass: sync map so the UI has names/DiceBear avatars immediately
       const syncUsers = normalizedProfiles.map(mapProfileSync);
       setState((s) => { s.users = syncUsers; });
+      saveList("users", syncUsers);
 
       // Second pass: batch resolve any storage-path avatars asynchronously
       resolveBatchAvatarUrls(normalizedProfiles).then((resolved) => {
