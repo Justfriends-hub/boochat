@@ -1,6 +1,7 @@
 // Central in-memory + localStorage-backed mock store.
 // All *Api modules read/write here. Swap for Supabase later without changing consumers.
 import { publish } from "./eventBus";
+import { seed } from "./seed";
 
 export type Role = "user" | "member" | "owner";
 
@@ -266,7 +267,6 @@ export function initStore() {
   if (hasChannelSeed) return;
 
   try {
-    const { seed } = require("./seed");
     seed(state);
     // Note: do NOT save demo data to localStorage; it will be kept in-memory only
     // so it persists during the session. This provides a fallback when Supabase fails.
@@ -288,4 +288,7 @@ export function resetStore() {
   save();
 }
 
-export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+// Function declaration (hoisted) so the circular import from ./seed is safe.
+export function uid() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}

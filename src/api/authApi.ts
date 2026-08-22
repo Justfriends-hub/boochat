@@ -99,6 +99,11 @@ async function bindPresence(userId: string | null) {
     // startPresence returns a cleanup function; it will call onProfileUpdate when the DB emits changes
     const cleanupFn = await startPresence(userId, (newProfile: any) => {
       try {
+        // Admin force-logged this session out — tear it down immediately
+        if (newProfile?.forced_logout) {
+          void signOut();
+          return;
+        }
         if (cachedUser && newProfile && newProfile.id === cachedUser.id) {
           const nextUser = toUser(newProfile);
           cachedUser = nextUser;
@@ -173,13 +178,20 @@ async function refreshCurrentUser(userId: string) {
     const client = ensureSupabase();
     const { data: profile, error: profileError } = await client
       .from("profiles")
-      .select("id,email,display_name,avatar_url,bio,online,banned,is_upgraded")
+      .select("id,email,display_name,avatar_url,bio,online,banned,is_upgraded,forced_logout")
       .eq("id", userId)
       .single();
 
     if (profileError || !profile) {
       cachedUser = null;
       publishAuthChange();
+      return;
+    }
+
+    // Admin force-logged this user out — end the local session
+    if (profile.forced_logout) {
+      console.warn("Session ended remotely by an administrator.");
+      await signOut();
       return;
     }
 

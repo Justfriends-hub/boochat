@@ -151,7 +151,9 @@ export function ChatView({ chatId }: { chatId: string }) {
         setMessageViewers(viewers);
       }
     );
-    return () => unsubscribe();
+    return () => {
+      void unsubscribe();
+    };
   }, [messages]);
 
   // Track message views when the component is visible or messages come into view

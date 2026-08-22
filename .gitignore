@@ -30,7 +30,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-task4_dedup_dm.sql
-migrations/2026-07-24_add_status_privacy.sql
-mycurrentschema.sql
+# Database schemas, dumps & SQL migrations — keep local only, never push
+*.sql
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.commandcode/
 /.supabase_quick_replies.sql

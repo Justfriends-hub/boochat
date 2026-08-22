@@ -232,11 +232,12 @@ export async function createGroup(input: {
 
 export async function updateChat(id: string, patch: Partial<Chat>) {
   const supabase = ensureSupabase();
-  if (patch.name !== undefined || patch.avatar !== undefined || patch.muted !== undefined) {
+  // NOTE: `muted` is a per-user preference and the live schema has no such
+  // column on `chats` — keep it in the local store only.
+  if (patch.name !== undefined || patch.avatar !== undefined) {
     const update: Record<string, any> = {};
     if (patch.name !== undefined) update.name = patch.name;
     if (patch.avatar !== undefined) update.avatar_url = patch.avatar;
-    if (patch.muted !== undefined) update.muted = patch.muted;
     const { error } = await supabase.from("chats").update(update).eq("id", id);
     if (error) throw new Error(error.message);
   }
@@ -264,6 +265,15 @@ export async function updateChat(id: string, patch: Partial<Chat>) {
         if (chat) chat.visibility = patch.visibility;
       });
     }
+  }
+
+  // Always mirror local-only fields so the UI reflects them immediately
+  if (patch.muted !== undefined || patch.name !== undefined || patch.avatar !== undefined) {
+    setState((s) => {
+      const chat = s.chats.find((c) => c.id === id);
+      if (!chat) return;
+      if (patch.muted !== undefined) chat.muted = patch.muted;
+    });
   }
 
   publish("chats:changed");
@@ -328,6 +338,16 @@ export async function requestJoinGroup(chatId: string, userId: string) {
     throw new Error("Your join request is already pending approval.");
   }
 
+  try {
+    const supabase = ensureSupabase();
+    const { error } = await supabase.from("join_requests").insert([
+      { chat_id: chatId, user_id: userId, status: "pending", requested_at: new Date().toISOString() },
+    ]);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("requestJoinGroup: failed to persist join request, applying locally:", err);
+  }
+
   setState((s) => {
     const target = s.chats.find((item) => item.id === chatId);
     if (!target) return;
@@ -342,6 +362,24 @@ export async function requestJoinGroup(chatId: string, userId: string) {
 }
 
 export async function approveJoinGroupRequest(chatId: string, userId: string) {
+  try {
+    const supabase = ensureSupabase();
+    const { error } = await supabase
+      .from("join_requests")
+      .update({ status: "approved" })
+      .eq("chat_id", chatId)
+      .eq("user_id", userId);
+    if (error) throw error;
+
+    const { error: memError } = await supabase
+      .from("chat_members")
+      .insert([{ chat_id: chatId, user_id: userId }]);
+    // 23505 = already a member; treat as success
+    if (memError && (memError as any).code !== "23505") throw memError;
+  } catch (err) {
+    console.warn("approveJoinGroupRequest: supabase failed, applying locally:", err);
+  }
+
   setState((s) => {
     const target = s.chats.find((item) => item.id === chatId);
     if (!target) return;
@@ -354,6 +392,18 @@ export async function approveJoinGroupRequest(chatId: string, userId: string) {
 }
 
 export async function rejectJoinGroupRequest(chatId: string, userId: string) {
+  try {
+    const supabase = ensureSupabase();
+    const { error } = await supabase
+      .from("join_requests")
+      .update({ status: "rejected" })
+      .eq("chat_id", chatId)
+      .eq("user_id", userId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("rejectJoinGroupRequest: supabase failed, applying locally:", err);
+  }
+
   setState((s) => {
     const target = s.chats.find((item) => item.id === chatId);
     if (!target) return;

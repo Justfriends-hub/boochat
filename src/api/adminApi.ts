@@ -1,6 +1,7 @@
 import { getState, setState, uid, type Boost, type AuditLog, type Report, normalizeRole, type Role } from "@/lib/mockStore";
 import { publish } from "@/lib/eventBus";
 import { ensureSupabase } from "@/lib/supabaseClient";
+import { deleteChannel as deleteChannelCascade } from "@/api/channelsApi";
 
 // ─── Internal audit helper ─────────────────────────────────────────────────
 function audit(entry: Omit<AuditLog, "id" | "createdAt">) {
@@ -33,6 +34,26 @@ export async function overviewStats() {
 }
 
 export async function listBoosts(): Promise<Boost[]> {
+  try {
+    const client = ensureSupabase();
+    const { data, error } = await client
+      .from("admin_boosts")
+      .select("id,admin_id,post_id,kind,amount,created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (!error && data) {
+      return (data as any[]).map((row) => ({
+        id: row.id,
+        adminId: row.admin_id,
+        postId: row.post_id,
+        kind: row.kind,
+        amount: row.amount,
+        createdAt: new Date(row.created_at).getTime(),
+      }));
+    }
+  } catch (err) {
+    console.warn("listBoosts: supabase query failed, falling back to local:", err);
+  }
   return [...getState().boosts].sort((a, b) => b.createdAt - a.createdAt);
 }
 export async function listAuditLogs(): Promise<AuditLog[]> {
@@ -129,7 +150,8 @@ export async function editUserProfile(
 
     if (fields.role !== undefined) {
       const normalizedRole = normalizeRole(fields.role);
-      const { error: roleError } = await client.from("user_roles").upsert({ user_id: userId, role: normalizedRole }, { onConflict: "user_id" });
+      // user_roles unique constraint is (user_id, role)
+      const { error: roleError } = await client.from("user_roles").upsert({ user_id: userId, role: normalizedRole }, { onConflict: "user_id,role" });
       if (roleError) throw roleError;
     }
 
@@ -184,7 +206,7 @@ export async function setUserUpgraded(userId: string, adminId: string, upgraded:
     if (!res.ok) {
       const json = await res.json().catch(() => ({}));
       adminEndpointError = json.error || `Admin update failed with status ${res.status}`;
-      throw new Error(adminEndpointError);
+      throw new Error(adminEndpointError ?? "Admin update failed");
     }
 
     adminEndpointWorked = true;
@@ -245,7 +267,7 @@ export async function resetUserPassword(userId: string, adminId: string) {
   // and must be performed server-side (Edge Function / serverless) — the client
   // cannot perform this securely. We attempt to call a configured admin function
   // endpoint and fall back to a local temp password for offline/dev mode.
-  const fnUrl = import.meta.env.VITE_SUPABASE_ADMIN_RESET_PASSWORD_URL;
+  const fnUrl = import.meta.env.VITE_SUPABASE_ADMIN_RESET_PASSWORD_URL ?? "/api/admin/reset-password";
   if (fnUrl) {
     try {
       // Get the current user's session token from Supabase Auth
@@ -420,18 +442,33 @@ export async function boostPost(input: {
   if (input.amount <= 0) throw new Error("Boost amount must be greater than zero.");
   try {
     const client = ensureSupabase();
-    // insert boost record
-    const { data, error } = await client.from("boosts").insert([{ admin_id: input.adminId, post_id: input.postId, kind: input.kind, amount: input.amount }]).select().single();
+    // Server-side RPC: validates admin role, increments the boosted counter
+    // atomically, logs to admin_boosts + audit_logs in one transaction.
+    const { error } = await client.rpc("apply_admin_boost", {
+      p_post_id: input.postId,
+      p_kind: input.kind,
+      p_amount: input.amount,
+    });
     if (error) throw error;
-    const boost: Boost = { id: data.id || uid(), adminId: input.adminId, postId: input.postId, kind: input.kind, amount: input.amount, createdAt: Date.now() };
-    // update local cache
-    setState((s) => { const p = s.channelPosts.find((x) => x.id === input.postId); if (p) { if (input.kind === "likes") p.boostedLikes = (p.boostedLikes || 0) + input.amount; else p.boostedViews = (p.boostedViews || 0) + input.amount; } s.boosts.push(boost); });
+
+    const boost: Boost = {
+      id: uid(), adminId: input.adminId, postId: input.postId,
+      kind: input.kind, amount: input.amount, createdAt: Date.now(),
+    };
+    setState((s) => {
+      const p = s.channelPosts.find((x) => x.id === input.postId);
+      if (p) {
+        if (input.kind === "likes") p.boostedLikes = (p.boostedLikes || 0) + input.amount;
+        else p.boostedViews = (p.boostedViews || 0) + input.amount;
+      }
+      s.boosts.push(boost);
+    });
     audit({ adminId: input.adminId, action: "boost_post", targetType: "post", targetId: input.postId, meta: { kind: input.kind, amount: input.amount } });
     publish("channels:changed");
     publish("boosts:changed");
     return boost;
   } catch (err) {
-    console.warn("boostPost: supabase insert failed, applying locally:", err);
+    console.warn("boostPost: supabase RPC failed, applying locally:", err);
     const boost: Boost = {
       id: uid(), adminId: input.adminId, postId: input.postId,
       kind: input.kind, amount: input.amount, createdAt: Date.now(),
@@ -490,18 +527,17 @@ export async function editChannel(
 
 export async function deleteChannel(channelId: string, adminId: string) {
   try {
-    const client = ensureSupabase();
-    await client.from("channel_posts").delete().eq("channel_id", channelId);
-    await client.from("channels").delete().eq("id", channelId);
+    // Full cascade (posts, reactions, members, removed members, join requests, communities)
+    await deleteChannelCascade(channelId);
   } catch (err) {
-    console.warn("deleteChannel: supabase delete failed, applying locally:", err);
+    console.warn("deleteChannel: supabase cascade failed, applying locally:", err);
+    setState((s) => {
+      s.channels = s.channels.filter((c) => c.id !== channelId);
+      s.channelPosts = s.channelPosts.filter((p) => p.channelId !== channelId);
+    });
+    publish("channels:changed");
   }
-  setState((s) => {
-    s.channels = s.channels.filter((c) => c.id !== channelId);
-    s.channelPosts = s.channelPosts.filter((p) => p.channelId !== channelId);
-  });
   audit({ adminId, action: "delete_channel", targetType: "channel", targetId: channelId });
-  publish("channels:changed");
 }
 
 export async function pinPost(postId: string, adminId: string) {

@@ -50,7 +50,7 @@ function SubscribersPage() {
           ))
         )}
       </div>
-      {page?.nextCursor != null ? <Button className="mt-3" variant="outline" onClick={() => setCursor(page.nextCursor)}>Load more</Button> : null}
+      {page?.nextCursor != null ? <Button className="mt-3" variant="outline" onClick={() => setCursor(page.nextCursor!)}>Load more</Button> : null}
     </div>
   );
 }

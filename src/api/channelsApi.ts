@@ -136,21 +136,16 @@ export async function listChannels(): Promise<Channel[]> {
 }
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
-  console.log("🔍 [getChannel] ENTRY - fetching channel with ID:", id);
   ensureSeed(); // Ensure seed data is available as fallback
   try {
     const supabase = ensureSupabase();
-    console.log("🌐 [getChannel] Supabase ready, querying channel:", id);
     const { data: channelRow, error: channelError } = await supabase
       .from("channels")
       .select("*")
       .eq("id", id)
       .single();
 
-    console.log("📦 [getChannel] Supabase response:", { hasData: !!channelRow, error: channelError });
-
     if (!channelError && channelRow) {
-      console.log("✨ [getChannel] SUCCESS - got channel from Supabase:", channelRow);
       const { data: memberRows } = await supabase
         .from("channel_members")
         .select("user_id")
@@ -165,7 +160,7 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
       const adminIds = (adminRows ?? []).map((row) => row.user_id);
       const allMembers = [channelRow.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
       const cached = getState().channels.find((c) => c.id === id);
-      let remoteChannel = mapChannel(channelRow, allMembers, adminIds);
+      const remoteChannel = mapChannel(channelRow, allMembers, adminIds);
       if (cached?.visibility) remoteChannel.visibility = cached.visibility;
       if (!isFullUrl(remoteChannel.avatar)) {
         remoteChannel.avatar = await getImageUrl("channel-media", remoteChannel.avatar);
@@ -178,19 +173,18 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
         if (idx >= 0) s.channels[idx] = remoteChannel;
         else s.channels.push(remoteChannel);
       });
-      console.log("🎯 [getChannel] RETURNING SUPABASE CHANNEL:", remoteChannel);
       return remoteChannel;
     }
 
     if (channelError) {
-      console.error("❌ [getChannel] Supabase error - falling back to mock store:", id, channelError);
+      console.error("getChannel: failed to query Supabase channel", id, channelError);
     }
   } catch (error) {
-    console.error("💥 [getChannel] EXCEPTION - falling back to mock store:", error);
+    console.error("getChannel: exception, falling back to cached channel:", error);
   }
   
   const cached = getState().channels.find((c) => c.id === id);
-  console.warn(`⚠️  [FALLBACK] Returning cached/seeded channel for ID ${id}:`, cached);
+  console.warn(`[Supabase offline] Returning cached/seeded channel for ID ${id}`);
   return cached;
 }
 
@@ -225,7 +219,7 @@ export async function createChannel(input: { name: string; description: string; 
     console.warn("Failed to add owner as member:", memberError);
   }
 
-  let ch = mapChannel({ ...channelRow, visibility }, [input.ownerId], [input.ownerId]);
+  const ch = mapChannel({ ...channelRow, visibility }, [input.ownerId], [input.ownerId]);
   if (!isFullUrl(ch.avatar)) {
     ch.avatar = await getImageUrl("channel-media", ch.avatar);
   }
@@ -364,7 +358,7 @@ export async function addChannelAdmin(channelId: string, userId: string) {
   try {
     const { data, error } = await supabase.from("channel_members").upsert(
       { channel_id: channelId, user_id: userId, is_admin: true },
-      { onConflict: ["channel_id", "user_id"] }
+      { onConflict: "channel_id,user_id" }
     );
     if (error) throw error;
   } catch (err) {
@@ -672,7 +666,17 @@ export async function unbanChannelMember(channelId: string, userId: string) {
   if (error) throw error;
 }
 
-export async function getChannelRecentActions(channelId: string) {
+export type ChannelRecentAction = {
+  id: string;
+  adminId: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  meta?: any;
+  createdAt: number;
+};
+
+export async function getChannelRecentActions(channelId: string): Promise<ChannelRecentAction[]> {
   try {
     const supabase = ensureSupabase();
     const { data, error } = await supabase
@@ -742,11 +746,8 @@ export async function deleteChannel(channelId: string) {
       .eq("channel_id", channelId);
     if (joinError) throw joinError;
 
-    const { error: communityError } = await supabase
-      .from("channel_communities")
-      .delete()
-      .eq("channel_id", channelId);
-    if (communityError) throw communityError;
+    // NOTE: channel_communities is a parent entity table in the live schema
+    // (channels.community_id FK) — no per-channel rows to delete here.
 
     const { error: channelError } = await supabase
       .from("channels")
@@ -795,7 +796,8 @@ export async function approveJoinChannelRequest(channelId: string, userId: strin
     if (error) throw error;
 
     const { error: memError } = await supabase.from("channel_members").insert([{ channel_id: channelId, user_id: userId }]);
-    if (memError) throw memError;
+    // 23505 = already a member; treat as success
+    if (memError && (memError as any).code !== "23505") throw memError;
   } catch (err) {
     console.warn("approveJoinChannelRequest: supabase failed, applying locally:", err);
   }
@@ -832,9 +834,12 @@ export async function rejectJoinChannelRequest(channelId: string, userId: string
 
 export async function addChannelToCommunity(channelId: string, communityId: string) {
   const supabase = ensureSupabase();
+  // Live schema stores the link directly on channels.community_id
+  // (FK → channel_communities.id); there is no join table.
   const { error } = await supabase
-    .from("channel_communities")
-    .insert([{ channel_id: channelId, community_id: communityId }]);
+    .from("channels")
+    .update({ community_id: communityId })
+    .eq("id", channelId);
   if (error) throw error;
 
   setState((s) => {
@@ -845,31 +850,16 @@ export async function addChannelToCommunity(channelId: string, communityId: stri
 }
 
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
-  console.log("🔍 [listPosts] ENTRY - fetching posts for channel:", channelId);
   ensureSeed(); // Ensure seed data is available as fallback
-  console.log("✅ [listPosts] Seed ensured. Current mock state:", {
-    channelPostsCount: getState().channelPosts.length,
-    channelPostIds: getState().channelPosts.map((p) => ({ id: p.id, channelId: p.channelId, body: p.body.substring(0, 30) })),
-  });
-  
+
   try {
     const supabase = ensureSupabase();
-    console.log("🌐 [listPosts] Supabase client ready, constructing query for channel:", channelId);
-    
     let query = supabase.from("channel_posts").select("*");
-    
-    if (channelId) {
-      query = query.eq("channel_id", channelId);
-      console.log("🔽 [listPosts] Filtered query for channel_id:", channelId);
-    }
-    
-    console.log("⏳ [listPosts] Executing Supabase query...");
+    if (channelId) query = query.eq("channel_id", channelId);
+
     const { data: posts, error } = await query.order("created_at", { ascending: false });
-    
-    console.log("📦 [listPosts] Supabase response:", { postsCount: posts?.length, hasError: !!error, error });
-    
+
     if (!error && posts) {
-      console.log("✨ [listPosts] SUCCESS - got posts from Supabase:", posts.length, posts.slice(0, 2));
       // Map Supabase posts to ChannelPost type
       const mappedPosts: ChannelPost[] = posts.map((p: any) => ({
         id: p.id,
@@ -894,28 +884,23 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
         ...p,
         image: imageUrls[i] ?? p.image,
       }));
-      console.log("🎯 [listPosts] RETURNING SUPABASE POSTS:", resolved.length);
       return resolved;
     }
 
     if (error) {
-      console.error("❌ [listPosts] Supabase error - falling back to mock store:", { channelId, error });
+      console.error("listPosts: Supabase error - falling back to mock store:", { channelId, error });
     }
   } catch (error) {
-    console.error("💥 [listPosts] EXCEPTION - falling back to mock store:", error);
+    console.error("listPosts: exception - falling back to mock store:", error);
   }
   
   const allChannelPosts = getState().channelPosts;
-  console.log("🔎 [listPosts] Mock store search - total posts available:", allChannelPosts.length);
-  console.log("📋 [listPosts] All posts in store:", allChannelPosts.map((p) => ({ id: p.id, channelId: p.channelId })));
-  
   const posts = channelId
     ? allChannelPosts.filter((p) => p.channelId === channelId)
     : [...allChannelPosts];
-  console.log("🔽 [listPosts] Filtered posts for channel", channelId, ":", posts.length, posts);
   
   const sorted = posts.sort((a, b) => b.createdAt - a.createdAt);
-  console.warn(`⚠️  [FALLBACK] Returning ${sorted.length} cached/seeded posts for channel ${channelId || "all"}`);
+  console.warn(`[Supabase offline] Returning ${sorted.length} cached/seeded posts for channel ${channelId || "all"}`);
   return sorted;
 }
 

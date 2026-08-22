@@ -1,4 +1,6 @@
 import { Check, CheckCheck, Play, Pencil, Trash2, Reply, Forward, Clock } from "lucide-react";
+import { useRef, type PointerEvent } from "react";
+import { toast } from "sonner";
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from "@/components/ui/context-menu";
@@ -23,13 +25,64 @@ export function MessageBubble({
   isViewedByRecipient?: boolean;
 }) {
   const deleted = !!m.deletedAt;
+  const longPressTimer = useRef<number | null>(null);
+
+  const handleCopy = async () => {
+    if (deleted || m.kind !== "text" || !m.body) return;
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(m.body);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = m.body;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      toast.success("Message copied");
+    } catch {
+      toast.error("Unable to copy message");
+    }
+  };
+
+  const startLongPress = (event: PointerEvent<HTMLDivElement>) => {
+    if (deleted || m.kind !== "text" || !m.body) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+
+    longPressTimer.current = window.setTimeout(() => {
+      void handleCopy();
+    }, 450);
+  };
+
+  const stopLongPress = () => {
+    if (longPressTimer.current) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
   return (
     <div className={cn("flex mb-1.5 px-3", isMine ? "justify-end" : "justify-start")}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
+            onPointerDown={startLongPress}
+            onPointerUp={stopLongPress}
+            onPointerLeave={stopLongPress}
+            onPointerCancel={stopLongPress}
+            onDoubleClick={(event) => {
+              if (deleted || m.kind !== "text" || !m.body) return;
+              event.preventDefault();
+              void handleCopy();
+            }}
             className={cn(
-              "group relative max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm",
+              "group relative max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm select-text",
               isMine
                 ? "rounded-br-sm bg-primary text-primary-foreground"
                 : "rounded-bl-sm bg-card text-card-foreground border",
@@ -83,6 +136,11 @@ export function MessageBubble({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
+          {m.kind === "text" && !deleted && (
+            <ContextMenuItem onSelect={() => { void handleCopy(); }}>
+              Copy text
+            </ContextMenuItem>
+          )}
           {onReply && (
             <ContextMenuItem onClick={onReply}>
               <Reply className="mr-2 h-4 w-4" /> Reply
