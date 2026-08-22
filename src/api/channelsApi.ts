@@ -99,6 +99,9 @@ async function fetchChannelMembers(channelIds: string[]) {
 
 export async function listChannels(): Promise<Channel[]> {
   ensureSeed(); // Ensure seed data is available as fallback
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    return getState().channels;
+  }
   try {
     const supabase = ensureSupabase();
     const { data: channels, error: channelError } = await supabase
@@ -143,6 +146,9 @@ export async function listChannels(): Promise<Channel[]> {
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
   ensureSeed(); // Ensure seed data is available as fallback
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    return getState().channels.find((c) => c.id === id);
+  }
   try {
     const supabase = ensureSupabase();
     const { data: channelRow, error: channelError } = await supabase
@@ -863,6 +869,13 @@ export async function addChannelToCommunity(channelId: string, communityId: stri
 
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
   ensureSeed(); // Ensure seed data is available as fallback
+
+  // Offline: serve cached/seeded posts immediately
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const all = getState().channelPosts;
+    const local = channelId ? all.filter((p) => p.channelId === channelId) : [...all];
+    return local.sort((a, b) => b.createdAt - a.createdAt);
+  }
 
   try {
     const supabase = ensureSupabase();

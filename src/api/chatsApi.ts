@@ -56,6 +56,10 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
+  // Offline: serve the cached snapshot immediately — no network wait
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    return getState().chats;
+  }
   try {
     const supabase = ensureSupabase();
     const { data: membershipRows, error: membershipError } = await supabase
@@ -99,6 +103,9 @@ export async function listChats(userId: string): Promise<Chat[]> {
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    return getState().chats.find((c) => c.id === id);
+  }
   try {
     const supabase = ensureSupabase();
     const { data: chatRow, error: chatError } = await supabase

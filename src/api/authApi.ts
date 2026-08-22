@@ -113,6 +113,11 @@ function cleanupPresence() {
 }
 
 async function bindPresence(userId: string | null) {
+  // Offline: presence channels can't connect — skip to avoid hangs
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    cleanupPresence();
+    return;
+  }
   if (!userId) {
     if (activePresenceUserId) {
       try {
@@ -174,6 +179,17 @@ export async function initializeAuth() {
       return;
     }
 
+    // Offline cold start: enter the app instantly from the persisted session —
+    // no network round-trips, no timeout waits.
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      if (!restoreOfflineSession()) {
+        cachedUser = null;
+        authReady = true;
+        publishAuthChange();
+      }
+      return;
+    }
+
     try {
       const client = ensureSupabase();
       const { data: sessionData } = await client.auth.getSession();
@@ -218,6 +234,11 @@ export async function initializeAuth() {
 }
 
 async function refreshCurrentUser(userId: string) {
+  // Offline: resolve from the persisted session immediately
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    restoreOfflineSession();
+    return;
+  }
   try {
     const client = ensureSupabase();
     const { data: profile, error: profileError } = await client
