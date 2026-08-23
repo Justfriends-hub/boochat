@@ -15,9 +15,16 @@ const FETCH_TIMEOUT_MS = 8_000;
 function timeoutFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  return fetch(input, { ...(init ?? {}), signal: init?.signal ?? controller.signal }).finally(
-    () => clearTimeout(timer),
-  );
+  return fetch(input, { ...(init ?? {}), signal: init?.signal ?? controller.signal })
+    .catch((err: unknown) => {
+      // Network died unexpectedly while we believed we were online — surface
+      // it so the connectivity pill flips back to red immediately.
+      if ((err as { name?: string } | null)?.name === "AbortError") {
+        void import("@/stores/syncStore").then((m) => m.reportNetworkFailure());
+      }
+      throw err;
+    })
+    .finally(() => clearTimeout(timer));
 }
 
 export const supabase: SupabaseClient | null = supabaseConfigured

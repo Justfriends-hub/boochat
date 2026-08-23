@@ -16,26 +16,14 @@ import { useSyncStore } from "@/stores/syncStore";
 import { getPendingCount } from "@/lib/offlineStore";
 
 export function OfflineBanner() {
-  const { status, pendingCount, setOnline, setPendingCount } = useSyncStore();
+  const { status, pendingCount, setPendingCount } = useSyncStore();
 
-  // Mirror window online/offline events into the store
+  // Online/offline transitions are owned by syncStore's connectivity watcher
+  // (it verifies with a real probe before celebrating). Here we only keep the
+  // pending-message badge in sync.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const handleOnline = () => setOnline(true);
-    const handleOffline = () => setOnline(false);
-
-    // Sync initial state
-    setOnline(navigator.onLine);
     setPendingCount(getPendingCount());
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, [setOnline, setPendingCount]);
+  }, [setPendingCount]);
 
   // Poll pending count every 3 s (lightweight — just reads an in-memory array)
   useEffect(() => {
@@ -53,20 +41,23 @@ export function OfflineBanner() {
       badge: pendingCount > 0 ? `${pendingCount} pending` : null,
     },
     syncing: {
-      bg: "bg-amber-500",
+      bg: "bg-emerald-500",
       icon: (
         <RefreshCw
           className="h-3.5 w-3.5 shrink-0 animate-spin"
           aria-hidden="true"
         />
       ),
-      text: pendingCount > 0 ? `Syncing ${pendingCount} message${pendingCount !== 1 ? "s" : ""}…` : "Syncing…",
+      text:
+        pendingCount > 0
+          ? `Back online — sending ${pendingCount} message${pendingCount !== 1 ? "s" : ""}…`
+          : "Back online — sending…",
       badge: null,
     },
     synced: {
       bg: "bg-emerald-500",
       icon: <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
-      text: "All messages synced",
+      text: "Back online",
       badge: null,
     },
   } as const;

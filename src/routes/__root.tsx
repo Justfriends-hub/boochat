@@ -18,6 +18,7 @@ import { OfflineBanner } from "@/components/OfflineBanner";
 import { InstallPromptBanner } from "@/components/InstallPromptBanner";
 import { initOfflineStore, getAppState, setAppState } from "@/lib/offlineStore";
 import { pruneMediaCache } from "@/lib/mediaCache";
+import { initConnectivityWatcher } from "@/stores/syncStore";
 
 function NotFoundComponent() {
   return (
@@ -150,6 +151,7 @@ function RootComponent() {
 
   // Initialize mock store + offline IndexedDB cache
   useEffect(() => {
+    initConnectivityWatcher(); // idempotent — owns online/offline transitions
     initStore();
     // Warm the in-memory store from the durable IndexedDB list mirror so
     // offline cold starts render chats/channels/users instantly.

@@ -11,7 +11,11 @@ import {
   getPendingCount,
 } from "@/lib/offlineStore";
 import { publish } from "@/lib/eventBus";
-import { useSyncStore } from "@/stores/syncStore";
+import {
+  useSyncStore,
+  registerOutboxDrain,
+  initConnectivityWatcher,
+} from "@/stores/syncStore";
 import { resolveMedia, getCachedMediaObjectUrl } from "@/lib/mediaCache";
 
 /**
@@ -279,17 +283,16 @@ export async function syncPendingMessages() {
   }
 }
 
-// Auto-register online sync listener
+// Connectivity events are owned by syncStore's watcher; we only register the
+// outbox drain so the green "sending…" handshake can empty the queue.
+registerOutboxDrain(syncPendingMessages);
+initConnectivityWatcher();
+
+// Drain anything queued by a previous session shortly after boot
 if (typeof window !== "undefined") {
-  window.addEventListener("online", () => {
-    useSyncStore.getState().setOnline(true);
-    syncPendingMessages();
-  });
-  window.addEventListener("offline", () => {
-    useSyncStore.getState().setOnline(false);
-  });
-  // Trigger initial sync attempt on startup
-  setTimeout(() => syncPendingMessages(), 1500);
+  setTimeout(() => {
+    void syncPendingMessages();
+  }, 1500);
 }
 
 export async function editMessage(id: string, body: string) {
