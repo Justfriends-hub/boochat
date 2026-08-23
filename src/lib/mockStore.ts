@@ -125,6 +125,8 @@ export type ChannelPost = {
   createdAt: number;
   boostedLikes?: number;
   boostedViews?: number;
+  /** Server-side aggregate view counter (channel_posts.view_count). */
+  realViewCount?: number;
   pinned?: boolean;
 };
 export type Comment = {
@@ -199,7 +201,7 @@ export type Store = {
   session: { userId: string } | null;
 };
 
-const STORAGE_KEY = "chatapp.store.v1";
+const STORAGE_KEY = "chatapp.store.v1"; // legacy key — cleaned up below
 
 const empty: Store = {
   users: [], chats: [], messages: [], statuses: [],
@@ -208,42 +210,20 @@ const empty: Store = {
   quickReplies: [],
 };
 
-// Initialize state from localStorage immediately so the UI can render a cached
-// snapshot synchronously on first paint while the app bootstraps.
-let state: Store = (typeof window !== "undefined") ? load() : empty;
-
-function isDemoStore(value: Partial<Store>): boolean {
-  const users = value.users ?? [];
-  const chats = value.chats ?? [];
-  const channels = value.channels ?? [];
-  return users.some((u) => /@demo\.app$/i.test(u.email))
-    || chats.some((c) => c.id.startsWith("chat-"))
-    || channels.some((c) => c.id.startsWith("channel-"));
+// Persistence is Dexie/IndexedDB ONLY (see lib/offlineStore.ts + lib/db.ts).
+// This module is the fast in-memory layer the UI reads synchronously;
+// routes/__root.tsx hydrates it from IndexedDB during boot via
+// initOfflineStore() + hydrateLists(). Nothing here writes localStorage.
+//
+// One-time cleanup: drop snapshots written by older versions of this module
+// so they can't consume quota forever.
+if (typeof window !== "undefined") {
+  try { window.localStorage.removeItem(STORAGE_KEY); } catch {
+    // storage unavailable (private mode etc.) — nothing to clean up
+  }
 }
 
-function load(): Store {
-  if (typeof window === "undefined") return empty;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return empty;
-    const parsed = JSON.parse(raw);
-    const next = { ...empty, ...parsed } as Store;
-    if (isDemoStore(next)) {
-      localStorage.removeItem(STORAGE_KEY);
-      return empty;
-    }
-    return next;
-  } catch {}
-  return empty;
-}
-let saveTimer: any;
-function save() {
-  if (typeof window === "undefined") return;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
-  }, 50);
-}
+let state: Store = empty;
 
 export function getState(): Store { return state; }
 function cloneStore(value: Store): Store {
@@ -257,7 +237,6 @@ export function setState(mutator: (s: Store) => void) {
   const nextState = cloneStore(state);
   mutator(nextState);
   state = nextState;
-  save();
 }
 
 
@@ -285,7 +264,6 @@ export function ensureSeed() {
 
 export function resetStore() {
   state = empty;
-  save();
 }
 
 /**

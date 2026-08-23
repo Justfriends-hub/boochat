@@ -1,7 +1,12 @@
 {
   "name": "tanstack_start_ts",
   "private": true,
-  "sideEffects": false,
+  "sideEffects": [
+    "src/api/messagesApi.ts",
+    "src/lib/eventBus.ts",
+    "src/lib/mockStore.ts",
+    "src/stores/syncStore.ts"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite dev",

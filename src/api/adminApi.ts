@@ -1,13 +1,46 @@
 import { getState, setState, uid, type Boost, type AuditLog, type Report, normalizeRole, type Role } from "@/lib/mockStore";
 import { publish } from "@/lib/eventBus";
-import { ensureSupabase } from "@/lib/supabaseClient";
+import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { deleteChannel as deleteChannelCascade } from "@/api/channelsApi";
+import { toast } from "sonner";
 
-// ─── Internal audit helper ─────────────────────────────────────────────────
+// ─── Internal helpers ───────────────────────────────────────────────────────
+/**
+ * A mutation failed to reach the server and was only applied to this device's
+ * local cache. Surface it honestly instead of letting success toasts lie.
+ */
+function warnLocalOnly(what: string) {
+  toast.warning(
+    `${what} was saved on this device only — the server could not be reached. It may not sync.`,
+    { duration: 6000 },
+  );
+}
+
+/**
+ * Append an audit entry. The local store keeps the panel working offline;
+ * the durable record lives in the server-side audit_logs table.
+ */
 function audit(entry: Omit<AuditLog, "id" | "createdAt">) {
   setState((s) => {
     s.auditLogs.push({ id: uid(), createdAt: Date.now(), ...entry });
   });
+  try {
+    const client = ensureSupabase();
+    void client
+      .from("audit_logs")
+      .insert({
+        admin_id: entry.adminId,
+        action: entry.action,
+        target_type: entry.targetType,
+        target_id: entry.targetId || null,
+        meta: (entry.meta ?? {}) as Record<string, unknown>,
+      })
+      .then(({ error }) => {
+        if (error) console.warn("audit: remote insert failed:", error.message);
+      });
+  } catch (err) {
+    console.warn("audit: supabase unavailable, kept locally only:", err);
+  }
   publish("audit:changed");
 }
 
@@ -15,6 +48,8 @@ function audit(entry: Omit<AuditLog, "id" | "createdAt">) {
 
 export async function overviewStats() {
   const s = getState();
+  const realViews = (p: { views: string[]; realViewCount?: number }) =>
+    p.realViewCount ?? p.views.length;
   return {
     users: s.users.length,
     chats: s.chats.filter((c) => c.type === "dm").length,
@@ -25,8 +60,8 @@ export async function overviewStats() {
     likes: s.channelPosts.reduce((a, p) => a + p.likes.length + (p.boostedLikes || 0), 0),
     realLikes: s.channelPosts.reduce((a, p) => a + p.likes.length, 0),
     boostedLikes: s.channelPosts.reduce((a, p) => a + (p.boostedLikes || 0), 0),
-    views: s.channelPosts.reduce((a, p) => a + p.views.length + (p.boostedViews || 0), 0),
-    realViews: s.channelPosts.reduce((a, p) => a + p.views.length, 0),
+    views: s.channelPosts.reduce((a, p) => a + realViews(p) + (p.boostedViews || 0), 0),
+    realViews: s.channelPosts.reduce((a, p) => a + realViews(p), 0),
     boostedViews: s.channelPosts.reduce((a, p) => a + (p.boostedViews || 0), 0),
     boosts: s.boosts.length,
     reports: s.reports.length,
@@ -57,9 +92,56 @@ export async function listBoosts(): Promise<Boost[]> {
   return [...getState().boosts].sort((a, b) => b.createdAt - a.createdAt);
 }
 export async function listAuditLogs(): Promise<AuditLog[]> {
+  try {
+    const client = ensureSupabase();
+    const { data, error } = await client
+      .from("audit_logs")
+      .select("id,admin_id,action,target_type,target_id,meta,created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (!error && data) {
+      return (data as any[]).map((row) => ({
+        id: row.id,
+        adminId: row.admin_id,
+        action: row.action,
+        targetType: row.target_type,
+        targetId: row.target_id ?? "",
+        meta: row.meta ?? undefined,
+        createdAt: new Date(row.created_at).getTime(),
+      }));
+    }
+  } catch (err) {
+    console.warn("listAuditLogs: supabase query failed, falling back to local:", err);
+  }
   return [...getState().auditLogs].sort((a, b) => b.createdAt - a.createdAt);
 }
+
+function mapReportRow(row: any): Report {
+  return {
+    id: row.id,
+    reporterId: row.reporter_id,
+    targetType: row.target_type,
+    targetId: row.target_id ?? "",
+    reason: row.reason,
+    status: row.status === "resolved" ? "resolved" : "open",
+    createdAt: new Date(row.created_at).getTime(),
+  };
+}
+
 export async function listReports(): Promise<Report[]> {
+  try {
+    const client = ensureSupabase();
+    const { data, error } = await client
+      .from("reports")
+      .select("id,reporter_id,target_type,target_id,reason,status,created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (!error && data) {
+      return (data as any[]).map(mapReportRow);
+    }
+  } catch (err) {
+    console.warn("listReports: supabase query failed, falling back to local:", err);
+  }
   return [...getState().reports].sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -68,12 +150,22 @@ export async function updateReportStatus(
   adminId: string,
   status: "open" | "resolved",
 ) {
+  let persisted = false;
+  try {
+    const client = ensureSupabase();
+    const { error } = await client.from("reports").update({ status }).eq("id", reportId);
+    if (!error) persisted = true;
+    else console.warn("updateReportStatus: remote update failed:", error.message);
+  } catch (err) {
+    console.warn("updateReportStatus: supabase unavailable:", err);
+  }
   setState((s) => {
     const r = s.reports.find((x) => x.id === reportId);
     if (r) r.status = status;
   });
   audit({ adminId, action: status === "resolved" ? "resolve_report" : "reopen_report", targetType: "report", targetId: reportId });
   publish("reports:changed");
+  if (!persisted) warnLocalOnly("Report status");
 }
 
 export function exportAuditLog(filters: {
@@ -96,8 +188,10 @@ export function exportAuditLog(filters: {
   return header + rows;
 }
 
-// Seed some reports if empty
+// Seed demo reports ONLY when running without a backend (pure offline/demo
+// mode). Fabricating reports in live deployments pollutes moderation state.
 export function seedAdminExtras() {
+  if (supabaseConfigured) return;
   const s = getState();
   if (s.reports.length === 0 && s.users.length > 0) {
     setState((st) => {
@@ -129,6 +223,7 @@ export async function toggleBan(userId: string, adminId: string) {
       const u = s.users.find((x) => x.id === userId);
       if (u) { u.banned = !u.banned; banned = !!u.banned; }
     });
+    warnLocalOnly("Ban state");
   }
   audit({ adminId, action: banned ? "ban_user" : "unban_user", targetType: "user", targetId: userId });
   publish("users:changed");
@@ -174,6 +269,7 @@ export async function editUserProfile(
       if (fields.avatar !== undefined) u.avatar = fields.avatar;
       if (fields.role !== undefined) u.role = normalizeRole(fields.role);
     });
+    warnLocalOnly("Profile edit");
   }
   audit({ adminId, action: "edit_user", targetType: "user", targetId: userId, meta: fields });
   publish("users:changed");
@@ -312,6 +408,7 @@ export async function resetUserPassword(userId: string, adminId: string) {
 
   // Fallback for dev/offline: generate a temporary password locally (NOT secure)
   const tempPassword = `reset_${Math.random().toString(36).slice(2, 10)}`;
+  warnLocalOnly("Password reset — the server was unreachable, so the password was NOT actually changed");
   audit({
     adminId,
     action: "reset_password",
@@ -330,6 +427,7 @@ export async function forceLogoutUser(userId: string, adminId: string) {
     if (error) throw error;
   } catch (err) {
     console.warn("forceLogoutUser: supabase update failed, applying locally:", err);
+    warnLocalOnly("Force logout");
   }
   setState((s) => {
     const u = s.users.find((x) => x.id === userId);
@@ -365,6 +463,7 @@ export async function editGroup(
     }
   } catch (err) {
     console.warn("editGroup: supabase update failed, applying locally:", err);
+    warnLocalOnly("Group edit");
   }
   setState((s) => {
     const g = s.chats.find((c) => c.id === groupId && c.type === "group");
@@ -387,6 +486,7 @@ export async function deleteGroup(groupId: string, adminId: string) {
     await client.from("chats").delete().eq("id", groupId).throwOnError();
   } catch (err) {
     console.warn("deleteGroup: supabase delete failed, applying locally:", err);
+    warnLocalOnly("Group deletion");
   }
   setState((s) => {
     s.chats = s.chats.filter((c) => c.id !== groupId);
@@ -407,6 +507,7 @@ export async function removeGroupMember(groupId: string, userId: string, adminId
     }
   } catch (err) {
     console.warn("removeGroupMember: supabase delete failed, applying locally:", err);
+    warnLocalOnly("Member removal");
   }
   setState((s) => {
     const g = s.chats.find((c) => c.id === groupId && c.type === "group");
@@ -422,6 +523,7 @@ export async function transferGroupOwnership(groupId: string, newOwnerId: string
     await client.from("groups").update({ owner_id: newOwnerId }).eq("chat_id", groupId);
   } catch (err) {
     console.warn("transferGroupOwnership: supabase update failed, applying locally:", err);
+    warnLocalOnly("Ownership transfer");
   }
   setState((s) => {
     const g = s.chats.find((c) => c.id === groupId && c.type === "group");
@@ -469,6 +571,7 @@ export async function boostPost(input: {
     return boost;
   } catch (err) {
     console.warn("boostPost: supabase RPC failed, applying locally:", err);
+    warnLocalOnly("Boost");
     const boost: Boost = {
       id: uid(), adminId: input.adminId, postId: input.postId,
       kind: input.kind, amount: input.amount, createdAt: Date.now(),
@@ -487,6 +590,7 @@ export async function deletePostAsAdmin(postId: string, adminId: string) {
     await client.from("channel_posts").delete().eq("id", postId);
   } catch (err) {
     console.warn("deletePostAsAdmin: supabase delete failed, applying locally:", err);
+    warnLocalOnly("Post deletion");
   }
   setState((s) => { s.channelPosts = s.channelPosts.filter((p) => p.id !== postId); });
   audit({ adminId, action: "delete_post", targetType: "post", targetId: postId });
@@ -510,6 +614,7 @@ export async function editChannel(
     }
   } catch (err) {
     console.warn("editChannel: supabase update failed, applying locally:", err);
+    warnLocalOnly("Channel edit");
   }
   setState((s) => {
     const ch = s.channels.find((c) => c.id === channelId);
@@ -546,6 +651,7 @@ export async function pinPost(postId: string, adminId: string) {
     await client.from("channel_posts").update({ pinned: true }).eq("id", postId);
   } catch (err) {
     console.warn("pinPost: supabase update failed, applying locally:", err);
+    warnLocalOnly("Pin");
   }
   setState((s) => {
     const p = s.channelPosts.find((x) => x.id === postId);
@@ -561,6 +667,7 @@ export async function unpinPost(postId: string, adminId: string) {
     await client.from("channel_posts").update({ pinned: false }).eq("id", postId);
   } catch (err) {
     console.warn("unpinPost: supabase update failed, applying locally:", err);
+    warnLocalOnly("Unpin");
   }
   setState((s) => {
     const p = s.channelPosts.find((x) => x.id === postId);

@@ -513,7 +513,7 @@ function AdminPage() {
                           <TableCell className="max-w-xs truncate">{p.body}</TableCell>
                           <TableCell>{p.likes.length}</TableCell>
                           <TableCell>{p.boostedLikes || 0}</TableCell>
-                          <TableCell>{p.views.length}</TableCell>
+                          <TableCell>{p.realViewCount ?? p.views.length}</TableCell>
                           <TableCell>{p.boostedViews || 0}</TableCell>
                           <TableCell>{p.pinned ? <Pin className="h-4 w-4 text-primary" /> : "—"}</TableCell>
                           <TableCell>

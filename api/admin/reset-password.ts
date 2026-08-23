@@ -84,10 +84,42 @@ export default async function handler(
     const adminUserId = sessionData.user.id;
     console.log(`Admin ${adminUserId} requesting password reset for user ${userId}`);
 
-    // TODO: Check if the caller (adminUserId) actually has admin role
-    // For now, we'll allow any authenticated user (in production, add role check)
-    // Example: query the user_roles table or check a custom claim in the JWT
-    
+    // Authorization: only callers with an "owner" (or legacy "superadmin") role
+    // in user_roles may reset another user's password.
+    const { data: roleRow, error: roleError } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", adminUserId)
+      .single();
+
+    if (roleError) {
+      console.warn("reset-password: role query failed:", roleError.message);
+      return res.status(403).json({ error: `Role check failed: ${roleError.message}` });
+    }
+
+    if (!roleRow || typeof roleRow.role !== "string") {
+      console.warn("reset-password: invalid role data:", roleRow);
+      return res.status(403).json({ error: "Unauthorized: No valid role" });
+    }
+
+    const normalizedRole = (role: string | null | undefined): "owner" | "member" | "user" => {
+      switch ((role ?? "").toLowerCase()) {
+        case "owner":
+        case "superadmin":
+          return "owner";
+        case "member":
+        case "admin":
+          return "member";
+        default:
+          return "user";
+      }
+    };
+
+    if (normalizedRole(roleRow.role) !== "owner") {
+      console.warn(`reset-password: forbidden, caller role is: ${roleRow.role}`);
+      return res.status(403).json({ error: `Unauthorized: User role is ${roleRow.role}, only owner can perform this action` });
+    }
+
     // Generate a temporary password
     const tempPassword = `TempPwd_${Math.random().toString(36).slice(2, 10).toUpperCase()}!`;
 

@@ -885,6 +885,28 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
     const { data: posts, error } = await query.order("created_at", { ascending: false });
 
     if (!error && posts) {
+      // Fetch all reactions for these posts in ONE batched query so like
+      // counts are real instead of always-empty placeholders.
+      const postIds = posts.map((p: any) => p.id);
+      let reactionRows: Array<{ post_id: string; user_id: string }> = [];
+      if (postIds.length > 0) {
+        try {
+          const { data: reactions, error: reactionsError } = await supabase
+            .from("channel_post_reactions")
+            .select("post_id,user_id")
+            .in("post_id", postIds);
+          if (!reactionsError && reactions) reactionRows = reactions as any[];
+        } catch (err) {
+          console.warn("listPosts: reaction fetch failed, likes will be empty:", err);
+        }
+      }
+      const likesByPost = new Map<string, string[]>();
+      for (const row of reactionRows) {
+        const list = likesByPost.get(row.post_id) ?? [];
+        if (!list.includes(row.user_id)) list.push(row.user_id);
+        likesByPost.set(row.post_id, list);
+      }
+
       // Map Supabase posts to ChannelPost type
       const mappedPosts: ChannelPost[] = posts.map((p: any) => ({
         id: p.id,
@@ -893,14 +915,14 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
         kind: p.kind,
         body: p.body,
         image: p.image_url,
-        likes: [], // Will fetch reactions separately
-        views: [], // Will track via view_count
+        likes: likesByPost.get(p.id) ?? [],
+        views: [], // per-user view rows aren't stored; aggregate lives in view_count
+        realViewCount: Number(p.view_count) || 0,
         createdAt: new Date(p.created_at).getTime(),
         boostedLikes: p.boosted_likes,
         boostedViews: p.boosted_views,
         pinned: p.pinned,
       }));
-      console.log("🗺️  [listPosts] Mapped posts:", mappedPosts.length);
 
       // Batch-resolve image_url storage paths to signed URLs, serving
       // previously-seen post images straight from the device cache.
@@ -951,8 +973,10 @@ export async function getPost(id: string): Promise<ChannelPost | undefined> {
       const { data: reactions } = await supabase
         .from("channel_post_reactions")
         .select("user_id")
-        .eq("post_id", id)
-        .eq("emoji", "❤️");
+        .eq("post_id", id);
+
+      // Match listPosts semantics: likes = unique reactors across all emojis.
+      const likes = Array.from(new Set((reactions ?? []).map((r: any) => r.user_id)));
 
       const rawImageUrl: string | undefined = post.image_url;
       const image = rawImageUrl
@@ -966,8 +990,9 @@ export async function getPost(id: string): Promise<ChannelPost | undefined> {
         kind: post.kind,
         body: post.body,
         image,
-        likes: reactions?.map((r: any) => r.user_id) ?? [],
-        views: [], // Approximate
+        likes,
+        views: [], // per-user view rows aren't stored; aggregate lives in view_count
+        realViewCount: Number(post.view_count) || 0,
         createdAt: new Date(post.created_at).getTime(),
         boostedLikes: post.boosted_likes,
         boostedViews: post.boosted_views,
@@ -1087,6 +1112,7 @@ export async function createPost(input: {
       image: displayImage,
       likes: [],
       views: [],
+      realViewCount: Number(post.view_count) || 0,
       createdAt: new Date(post.created_at).getTime(),
       boostedLikes: post.boosted_likes,
       boostedViews: post.boosted_views,
@@ -1192,7 +1218,7 @@ export function likeCount(p: ChannelPost) {
 }
 
 export function viewCount(p: ChannelPost) {
-  return (p.views?.length ?? 0) + (p.boostedViews ?? 0);
+  return (p.realViewCount ?? p.views?.length ?? 0) + (p.boostedViews ?? 0);
 }
 
 export async function uploadChannelAvatar(channelId: string, file: File): Promise<string> {

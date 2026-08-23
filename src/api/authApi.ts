@@ -144,6 +144,13 @@ async function bindPresence(userId: string | null) {
           void signOut();
           return;
         }
+        // Admin banned this account mid-session — tear it down immediately
+        if (newProfile?.banned) {
+          cachedUser = null;
+          persistOfflineUser(null);
+          void signOut();
+          return;
+        }
         if (cachedUser && newProfile && newProfile.id === cachedUser.id) {
           const nextUser = toUser(newProfile);
           cachedUser = nextUser;
@@ -178,6 +185,13 @@ export async function initializeAuth() {
       const client = ensureSupabase();
       const { data: sessionData } = await client.auth.getSession();
       if (sessionData.session?.user?.id) {
+        // Paint the persisted last-known profile immediately so returning
+        // users see the app instantly while the network refresh runs.
+        const offlineUser = loadOfflineUser();
+        if (offlineUser && !offlineUser.banned) {
+          cachedUser = offlineUser;
+          publishAuthChange();
+        }
         await refreshCurrentUser(sessionData.session.user.id);
       } else {
         cachedUser = null;
@@ -233,6 +247,16 @@ async function refreshCurrentUser(userId: string) {
         cachedUser = null;
         publishAuthChange();
       }
+      return;
+    }
+
+    // Admin banned this account — end the session and wipe the offline cache
+    // so a cold start without connectivity can't resurrect it.
+    if (profile.banned) {
+      console.warn("Account is banned. Signing out.");
+      cachedUser = null;
+      persistOfflineUser(null);
+      await signOut();
       return;
     }
 
