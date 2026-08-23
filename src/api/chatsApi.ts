@@ -57,14 +57,6 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
-  // Offline: serve the durable local snapshot immediately — no network wait
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    return getOfflineList(
-      () => getState().chats,
-      "chats",
-      (items) => hydrateLists({ chats: items }),
-    );
-  }
   try {
     const supabase = ensureSupabase();
     const { data: membershipRows, error: membershipError } = await supabase
@@ -105,19 +97,17 @@ export async function listChats(userId: string): Promise<Chat[]> {
   } catch (error) {
     console.warn("Unable to load remote chats, returning cached chats:", error);
   }
-  return getState().chats;
+  // Fallback: in-memory snapshot first, then the durable IndexedDB mirror
+  const memoryChats = getState().chats;
+  if (memoryChats.length) return memoryChats;
+  return getOfflineList(
+    () => getState().chats,
+    "chats",
+    (items) => hydrateLists({ chats: items }),
+  );
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
-  // Offline: serve the durable local snapshot immediately
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const local = await getOfflineList(
-      () => getState().chats,
-      "chats",
-      (items) => hydrateLists({ chats: items }),
-    );
-    return local.find((c) => c.id === id);
-  }
   try {
     const supabase = ensureSupabase();
     const { data: chatRow, error: chatError } = await supabase
@@ -154,7 +144,15 @@ export async function getChat(id: string): Promise<Chat | undefined> {
   } catch (error) {
     console.warn("Unable to load remote chat, returning cached chat:", error);
   }
-  return getState().chats.find((c) => c.id === id);
+  // Fallback: in-memory snapshot first, then the durable IndexedDB mirror
+  const memoryChat = getState().chats.find((c) => c.id === id);
+  if (memoryChat) return memoryChat;
+  const local = await getOfflineList(
+    () => getState().chats,
+    "chats",
+    (items) => hydrateLists({ chats: items }),
+  );
+  return local.find((c) => c.id === id);
 }
 
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {

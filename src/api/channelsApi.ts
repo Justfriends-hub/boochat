@@ -101,13 +101,6 @@ async function fetchChannelMembers(channelIds: string[]) {
 
 export async function listChannels(): Promise<Channel[]> {
   ensureSeed(); // Ensure seed data is available as fallback
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    return getOfflineList(
-      () => getState().channels,
-      "channels",
-      (items) => hydrateLists({ channels: items }),
-    );
-  }
   try {
     const supabase = ensureSupabase();
     const { data: channels, error: channelError } = await supabase
@@ -146,21 +139,17 @@ export async function listChannels(): Promise<Channel[]> {
   } catch (error) {
     console.warn("Unable to load remote channels, returning cached channels:", error);
   }
-  const fallbackChannels = getState().channels;
+  const fallbackChannels = await getOfflineList(
+    () => getState().channels,
+    "channels",
+    (items) => hydrateLists({ channels: items }),
+  );
   console.warn(`[Supabase offline] Returning ${fallbackChannels.length} cached/seeded channels`);
   return fallbackChannels;
 }
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
   ensureSeed(); // Ensure seed data is available as fallback
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const local = await getOfflineList(
-      () => getState().channels,
-      "channels",
-      (items) => hydrateLists({ channels: items }),
-    );
-    return local.find((c) => c.id === id);
-  }
   try {
     const supabase = ensureSupabase();
     const { data: channelRow, error: channelError } = await supabase
@@ -214,8 +203,14 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
   }
   
   const cached = getState().channels.find((c) => c.id === id);
+  if (cached) return cached;
   console.warn(`[Supabase offline] Returning cached/seeded channel for ID ${id}`);
-  return cached;
+  const local = await getOfflineList(
+    () => getState().channels,
+    "channels",
+    (items) => hydrateLists({ channels: items }),
+  );
+  return local.find((c) => c.id === id);
 }
 
 export async function createChannel(input: { name: string; description: string; ownerId: string; onlyAdminsPost?: boolean; visibility?: "public" | "private" }) {
@@ -882,17 +877,6 @@ export async function addChannelToCommunity(channelId: string, communityId: stri
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
   ensureSeed(); // Ensure seed data is available as fallback
 
-  // Offline: serve the durable local snapshot immediately
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const all = await getOfflineList(
-      () => getState().channelPosts,
-      "channelPosts",
-      (items) => hydrateLists({ channelPosts: items }),
-    );
-    const local = channelId ? all.filter((p) => p.channelId === channelId) : [...all];
-    return local.sort((a, b) => b.createdAt - a.createdAt);
-  }
-
   try {
     const supabase = ensureSupabase();
     let query = supabase.from("channel_posts").select("*");
@@ -939,7 +923,11 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
     console.error("listPosts: exception - falling back to mock store:", error);
   }
   
-  const allChannelPosts = getState().channelPosts;
+  const allChannelPosts = await getOfflineList(
+    () => getState().channelPosts,
+    "channelPosts",
+    (items) => hydrateLists({ channelPosts: items }),
+  );
   const posts = channelId
     ? allChannelPosts.filter((p) => p.channelId === channelId)
     : [...allChannelPosts];

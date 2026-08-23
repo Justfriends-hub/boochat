@@ -15,11 +15,18 @@
  *
  * Cache versioning: bump SHELL_CACHE / ASSET_CACHE together to force-evict.
  */
-const SHELL_CACHE = "meshly-shell-v4";
-const ASSET_CACHE = "meshly-assets-v4";
+const SHELL_CACHE = "meshly-shell-v5";
+const ASSET_CACHE = "meshly-assets-v5";
 const IMAGE_CACHE = "meshly-images-v1";
 
 const APP_SHELL = ["/", "/manifest.webmanifest"];
+
+/**
+ * Full list of hashed build assets, injected by scripts/build-sw.mjs at the
+ * end of `npm run build`. Precaching ALL of them at install means every
+ * route works offline immediately — no blank screens on first offline start.
+ */
+const PRECACHE_ASSETS = ["__PRECACHE_MANIFEST__"];
 
 // ── Install: pre-cache the shell + entry assets ───────────────────────────
 self.addEventListener("install", (e) => {
@@ -36,29 +43,17 @@ async function precacheShellAndEntryAssets() {
     const shellCache = await caches.open(SHELL_CACHE);
     await shellCache.addAll(APP_SHELL).catch(() => {});
 
-    let html = "";
-    const cachedShell = await shellCache.match("/");
-    if (cachedShell) {
-      html = await cachedShell.text();
-    } else {
-      const res = await fetch("/", { cache: "no-store" });
-      if (!res || !res.ok) return;
-      html = await res.text();
-      await shellCache.put("/", res.clone()).catch(() => {});
-    }
-
-    const assetUrls = new Set();
-    const re = /(?:src|href)="(\/assets\/[^"]+\.(?:js|css))"/g;
-    let match;
-    while ((match = re.exec(html)) !== null) assetUrls.add(match[1]);
-
-    if (assetUrls.size > 0) {
+    // Precache the entire build manifest (every route chunk, in batches)
+    if (Array.isArray(PRECACHE_ASSETS) && PRECACHE_ASSETS.length > 0) {
       const assetCache = await caches.open(ASSET_CACHE);
-      await Promise.all(
-        Array.from(assetUrls).map((u) =>
-          assetCache.add(new Request(u, { cache: "reload" })).catch(() => {}),
-        ),
-      );
+      const BATCH = 8;
+      for (let i = 0; i < PRECACHE_ASSETS.length; i += BATCH) {
+        await Promise.all(
+          PRECACHE_ASSETS.slice(i, i + BATCH).map((u) =>
+            assetCache.add(new Request(u, { cache: "reload" })).catch(() => {}),
+          ),
+        );
+      }
     }
   } catch {
     // best-effort — runtime caching covers whatever we missed
@@ -143,8 +138,13 @@ self.addEventListener("fetch", (event) => {
         const networkUpdate = fetch(req)
           .then((res) => {
             if (res && res.ok) {
-              // Always store under the canonical "/" key
+              // Canonical shell + per-path SSR HTML (so an offline reload of a
+              // deep link hydrates against ITS OWN markup — no mismatch)
               cache.put("/", res.clone()).catch(() => {});
+              try {
+                const p = new URL(req.url).pathname;
+                if (p !== "/") cache.put(p, res.clone()).catch(() => {});
+              } catch {}
             }
             return res;
           })

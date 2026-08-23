@@ -154,24 +154,6 @@ async function pruneExpiredStatuses() {
 const STATUS_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
-  // Offline: replay everything from the device instantly — including media,
-  // re-attached from the on-device cache so stories/photos play with no network.
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const local = await getOfflineList(
-      () => getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt),
-      "statuses",
-      (items) => hydrateLists({ statuses: items }),
-    );
-    const withMedia = await Promise.all(
-      local.map(async (st) => ({
-        ...st,
-        media: st.storagePath ? (await getCachedMediaObjectUrl(st.storagePath)) || st.media : st.media,
-      })),
-    );
-    if (!viewerId) return withMedia;
-    return withMedia.filter((st) => isVisibleTo(st, viewerId));
-  }
-
   try {
     await pruneExpiredStatuses();
 
@@ -280,9 +262,24 @@ export async function listActiveStatuses(viewerId?: string): Promise<Status[]> {
   } catch (err) {
     console.warn("Unable to fetch active statuses online, returning cached statuses:", err);
   }
-  const all = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
-  if (!viewerId) return all;
-  return all.filter((st) => isVisibleTo(st, viewerId));
+  // Fallback: in-memory snapshot first, then the durable IndexedDB mirror,
+  // with media re-attached from the device cache so stories replay offline.
+  const memoryStatuses = getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt);
+  const local = memoryStatuses.length
+    ? memoryStatuses
+    : await getOfflineList(
+        () => getState().statuses.filter((s) => !isExpired(s)).sort((a, b) => b.createdAt - a.createdAt),
+        "statuses",
+        (items) => hydrateLists({ statuses: items }),
+      );
+  const withMedia = await Promise.all(
+    local.map(async (st) => ({
+      ...st,
+      media: st.storagePath ? (await getCachedMediaObjectUrl(st.storagePath)) || st.media : st.media,
+    })),
+  );
+  if (!viewerId) return withMedia;
+  return withMedia.filter((st) => isVisibleTo(st, viewerId));
 }
 
 function areContacts(userA: string, userB: string) {

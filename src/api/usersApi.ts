@@ -82,14 +82,6 @@ async function mapProfileAsync(profile: any): Promise<User> {
 }
 
 export async function listUsers(): Promise<User[]> {
-  // Offline: durable local snapshot immediately
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    return getOfflineList(
-      () => getState().users,
-      "users",
-      (items) => hydrateLists({ users: items }),
-    );
-  }
   try {
     const supabase = ensureSupabase();
     const { data, error } = await supabase
@@ -130,18 +122,19 @@ export async function listUsers(): Promise<User[]> {
   } catch (err) {
     console.warn("Offline or network error fetching users, returning cached users:", err);
   }
-  return getState().users;
+  const memoryUsers = getState().users;
+  if (memoryUsers.length) return memoryUsers;
+  return getOfflineList(
+    () => getState().users,
+    "users",
+    (items) => hydrateLists({ users: items }),
+  );
 }
 
 export async function getUser(id: string): Promise<User | undefined> {
   // Check cache first for instant response
   const cached = getState().users.find((u) => u.id === id);
   if (cached && /^https?:\/\//i.test(cached.avatar || "")) return cached;
-
-  // Offline: cached snapshot immediately
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    return getState().users.find((u) => u.id === id);
-  }
 
   try {
     const supabase = ensureSupabase();

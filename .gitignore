@@ -20,6 +20,9 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Temporary debug/testing scaffolding (certs, playwright probes, screenshots, profiles)
+.tmp-*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
