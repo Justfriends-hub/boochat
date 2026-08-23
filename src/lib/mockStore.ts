@@ -57,6 +57,9 @@ export type Message = {
   replyTo?: string;
   forwardedFrom?: string;
   status: "pending" | "sent" | "delivered" | "read";
+  /** Transient — raw media awaiting upload while queued in the outbox.
+   * Persisted by IndexedDB (structured clone), never rendered directly. */
+  mediaFile?: File;
 };
 
 

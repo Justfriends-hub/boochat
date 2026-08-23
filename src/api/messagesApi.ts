@@ -125,26 +125,13 @@ export async function sendMessage(input: {
   body: string;
   /** Optional media File — image or voice audio. */
   mediaFile?: File;
+  /** Existing storage path when re-sending known media (e.g. forwards) —
+   * skips a redundant upload and preserves the attachment. */
+  imagePath?: string;
   duration?: number;
   replyTo?: string;
   forwardedFrom?: string;
 }): Promise<Message> {
-  // If a media file is provided, upload it first before creating the optimistic message
-  let imagePath: string | undefined;
-  let imageDisplayUrl: string | undefined;
-
-  if (input.mediaFile) {
-    try {
-      if (input.kind === "image") {
-        imagePath = await uploadImage(input.mediaFile, "chat-media", `${input.chatId}`);
-      } else {
-        imagePath = await uploadFile(input.mediaFile, "chat-media", `${input.chatId}`);
-      }
-      imageDisplayUrl = await getImageUrl("chat-media", imagePath);
-    } catch (err: any) {
-      throw new Error(err.message || "Failed to upload media");
-    }
-  }
   // Capture caption (if any) separately so we don't accidentally persist
   // local preview URLs (blob:) or signed display URLs as the message body.
   const caption = input.mediaFile ? (input.body && input.body.trim() ? input.body : undefined) : undefined;
@@ -155,15 +142,18 @@ export async function sendMessage(input: {
     chatId: input.chatId,
     senderId: input.senderId,
     kind: input.kind,
-    body: imageDisplayUrl ?? input.body, // local preview URL for image/voice or plain text
+    // Local blob URL renders the media instantly; replaced by the signed URL
+    // once delivery confirms. Kept out of the DB insert (see deliverPending).
+    body: input.mediaFile ? URL.createObjectURL(input.mediaFile) : input.body,
     caption,
-    imagePath,
+    imagePath: input.imagePath,
     duration: input.duration,
     replyTo: input.replyTo,
     forwardedFrom: input.forwardedFrom,
     createdAt: Date.now(),
     status: "pending",
   };
+  if (input.mediaFile) pendingMsg.mediaFile = input.mediaFile;
 
   // 1. Immediately store locally and render in UI (0ms delay)
   saveLocalMessage(pendingMsg);
@@ -175,24 +165,43 @@ export async function sendMessage(input: {
     return pendingMsg;
   }
 
-  // 3. Send to Supabase
+  // 3. Deliver online; any failure is queued for retry, never lost.
+  return deliverPending(pendingMsg);
+}
+
+/**
+ * Uploads pending media (if needed), inserts the row server-side, and swaps
+ * the local pending copy for the confirmed message. On ANY failure the
+ * message stays queued in the outbox — media messages can no longer be lost
+ * to a flaky connection mid-upload.
+ */
+async function deliverPending(pendingMsg: Message): Promise<Message> {
   try {
     const supabase = ensureSupabase();
-    const bodyToInsert = input.kind === "voice"
+
+    let imagePath = pendingMsg.imagePath;
+    if (pendingMsg.mediaFile && !imagePath) {
+      imagePath = pendingMsg.kind === "image"
+        ? await uploadImage(pendingMsg.mediaFile, "chat-media", `${pendingMsg.chatId}`)
+        : await uploadFile(pendingMsg.mediaFile, "chat-media", `${pendingMsg.chatId}`);
+    }
+    const imageDisplayUrl = imagePath ? await getImageUrl("chat-media", imagePath) : undefined;
+
+    const bodyToInsert = pendingMsg.kind === "voice"
       ? ""
       : imagePath
-      ? (input.body && input.body.trim() ? input.body : "")
-      : input.body;
+      ? (pendingMsg.caption?.trim() || "")
+      : pendingMsg.body;
 
     const insert = {
-      chat_id: input.chatId,
-      sender_id: input.senderId,
+      chat_id: pendingMsg.chatId,
+      sender_id: pendingMsg.senderId,
       kind: pendingMsg.kind,
       body: bodyToInsert,
       image_path: imagePath,
-      duration: input.duration,
-      reply_to: input.replyTo,
-      forwarded_from: input.forwardedFrom,
+      duration: pendingMsg.duration,
+      reply_to: pendingMsg.replyTo,
+      forwarded_from: pendingMsg.forwardedFrom,
     };
 
     const { data, error } = await supabase
@@ -202,24 +211,22 @@ export async function sendMessage(input: {
       .single();
 
     if (error || !data) {
-      // If network/RLS error occurs, queue in outbox for retry
-      addToOutbox(pendingMsg);
-      return pendingMsg;
+      throw error ?? new Error("Message insert returned no data");
     }
 
     const sentMsg = mapMessage(data);
-    // Restore signed display URL so the UI doesn't flicker
+    // Restore a displayable URL so the UI doesn't flicker
     if (imageDisplayUrl) sentMsg.body = imageDisplayUrl;
-    
+
     // Replace pending message with confirmed sent message
     saveLocalMessage(sentMsg);
-    removeFromOutbox(tempId);
-    
-    await supabase.from("chats").update({ updated_at: new Date().toISOString() }).eq("id", input.chatId);
-    publish(`chat:${input.chatId}`);
+    removeFromOutbox(pendingMsg.id);
+
+    void supabase.from("chats").update({ updated_at: new Date().toISOString() }).eq("id", pendingMsg.chatId);
+    publish(`chat:${pendingMsg.chatId}`);
     return sentMsg;
   } catch (err) {
-    console.warn("Failed to send message online, queued in outbox:", err);
+    console.warn("Message delivery failed, queued in outbox:", err);
     addToOutbox(pendingMsg);
     return pendingMsg;
   }
@@ -235,48 +242,21 @@ export async function syncPendingMessages() {
   setSyncing(true);
   setPendingCount(outbox.length);
 
-  const supabase = ensureSupabase();
-  let syncedCount = 0;
-
   for (const pendingMsg of outbox) {
     try {
-      const bodyToInsert = pendingMsg.kind === "voice"
-        ? ""
-        : pendingMsg.imagePath
-        ? (pendingMsg.caption?.trim() || "")
-        : pendingMsg.body;
-
-      const insert = {
-        chat_id: pendingMsg.chatId,
-        sender_id: pendingMsg.senderId,
-        kind: pendingMsg.kind,
-        body: bodyToInsert,
-        image_path: pendingMsg.imagePath,
-        duration: pendingMsg.duration,
-        reply_to: pendingMsg.replyTo,
-        forwarded_from: pendingMsg.forwardedFrom,
-      };
-
-      const { data, error } = await supabase
-        .from("messages")
-        .insert([insert])
-        .select()
-        .single();
-
-      if (!error && data) {
-        const sentMsg = mapMessage(data);
-        saveLocalMessage(sentMsg);
-        removeFromOutbox(pendingMsg.id);
-        publish(`chat:${pendingMsg.chatId}`);
-        syncedCount++;
-        setPendingCount(getPendingCount());
-      }
+      // deliverPending uploads any pending media, inserts, and removes from
+      // the outbox on success; on failure it re-queues and returns the
+      // still-pending copy.
+      await deliverPending(pendingMsg);
     } catch (err) {
       console.warn("Failed syncing pending message:", err);
     }
+    setPendingCount(getPendingCount());
   }
 
-  if (syncedCount > 0) {
+  // Only celebrate when the queue is genuinely empty — partial failures keep
+  // their items queued for the next reconnect.
+  if (getPendingCount() === 0) {
     markSynced();
   } else {
     setSyncing(false);
@@ -339,7 +319,10 @@ export async function forwardMessage(id: string, toChatId: string, senderId: str
     chatId: toChatId,
     senderId,
     kind: data.kind,
-    body: data.body,
+    body: data.body || "",
+    // Carry the attachment so forwarded images/voice don't degrade to text
+    imagePath: data.image_path ?? undefined,
+    duration: data.duration ?? undefined,
     forwardedFrom: data.sender_id,
   });
 }

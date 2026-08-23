@@ -323,20 +323,52 @@ export async function leaveGroup(chatId: string, userId: string) {
 }
 
 export function subscribeToChats(cb: () => void) {
-  try {
-    const supabase = ensureSupabase();
-    const channel = supabase.channel("chats");
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "chats" }, () => cb());
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, () => cb());
-    channel.subscribe();
+  // Shared-singleton realtime channel: every call site (chats list, groups
+  // list, admin page…) registers a handler on ONE socket pair instead of each
+  // opening its own subscription — fewer connections, less mobile battery.
+  // Same pattern as subscribeToChannels in channelsApi.
+  const globalKey = Symbol.for("boochat.chatRealtime.listeners");
+  const globalState = ((globalThis as any)[globalKey] ?? {
+    handlers: new Set<() => void>(),
+    subscription: null,
+  }) as {
+    handlers: Set<() => void>;
+    subscription: { unsubscribe: () => void } | null;
+  };
+  (globalThis as any)[globalKey] = globalState;
 
-    return () => {
-      channel.unsubscribe();
-    };
-  } catch (error) {
-    console.warn("Unable to subscribe to chat updates:", error);
-    return () => undefined;
+  globalState.handlers.add(cb);
+
+  if (!globalState.subscription) {
+    try {
+      const supabase = ensureSupabase();
+      const channel = supabase.channel("chats");
+      const notify = () => {
+        Array.from(globalState.handlers as Set<() => void>).forEach((handler) => handler());
+      };
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "chats" }, notify);
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, notify);
+      channel.subscribe();
+      globalState.subscription = channel;
+    } catch (error) {
+      console.warn("Unable to subscribe to chat updates:", error);
+      return () => {
+        globalState.handlers.delete(cb);
+      };
+    }
   }
+
+  return () => {
+    globalState.handlers.delete(cb);
+    if (globalState.handlers.size === 0 && globalState.subscription) {
+      try {
+        globalState.subscription.unsubscribe();
+      } catch (error) {
+        console.warn("Failed to unsubscribe from chat realtime:", error);
+      }
+      globalState.subscription = null;
+    }
+  };
 }
 
 function ensureJoinRequestList(requests?: JoinRequest[]) {
