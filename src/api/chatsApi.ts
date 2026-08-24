@@ -1,16 +1,21 @@
 import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import { getState, setState, hydrateLists, type Chat, type JoinRequest } from "@/lib/mockStore";
-import { getOfflineList, saveList } from "@/lib/offlineStore";
+import { getOfflineList, getSavedList, saveList } from "@/lib/offlineStore";
+import { resolveDisplayUrl } from "@/lib/mediaCache";
+import { userAvatarFallback } from "@/lib/avatar";
 
 function mapChat(chat: any, members: string[], group: any | null): Chat {
   const visibility = chat.visibility ?? (chat.is_public === false ? "private" : "public");
+  const rawAvatar: string | undefined = chat.avatar_url ?? undefined;
   const base: Chat = {
     id: chat.id,
     type: chat.type,
     memberIds: members,
     createdAt: new Date(chat.created_at).getTime(),
-    avatar: chat.avatar_url ?? undefined,
+    // Keep the RAW value here (storage path or full URL). Display copies are
+    // resolved separately so the durable mirror never holds dead blob:/signed URLs.
+    avatar: rawAvatar,
     name: chat.name ?? undefined,
     ownerId: group?.owner_id ?? undefined,
     admins: group?.admins ?? undefined,
@@ -21,6 +26,20 @@ function mapChat(chat: any, members: string[], group: any | null): Chat {
     visibility,
   };
   return base;
+}
+
+/**
+ * Convert a cached chat's avatar into a LIVE display URL:
+ * storage path → device cache blob; stale blob:/data: → deterministic
+ * DiceBear fallback (group seed = chat id/name). Never renders blank offline.
+ */
+async function resolveChatAvatar(chat: Chat): Promise<Chat> {
+  const avatar = await resolveDisplayUrl(chat.avatar, chat.id || chat.name);
+  return { ...chat, avatar };
+}
+
+export async function rehydrateChatAvatars(chats: Chat[]): Promise<Chat[]> {
+  return Promise.all(chats.map(resolveChatAvatar));
 }
 
 function handleSupabaseError(error: any, context: string): Error {
@@ -59,26 +78,36 @@ async function fetchChatMembers(chatIds: string[]) {
 export async function listChats(userId: string): Promise<Chat[]> {
   const filterByMember = (list: Chat[]) => list.filter((c) => c.memberIds.includes(userId));
 
-  const getCached = async (): Promise<Chat[]> => {
+  /**
+   * Durable cache read. Order: memory → IndexedDB mirror (ALWAYS consulted
+   * when memory misses the member, since memory may be a stale/partial
+   * snapshot that shadows the mirror). Member filter is relaxed to an
+   * unfiltered fallback — a mirror saved on this device is user-scoped
+   * already, and strict filtering is what produced "no chats" false negatives.
+   */
+  const getCached = async (): Promise<{ list: Chat[]; durableOnly: boolean }> => {
     const mem = getState().chats;
     if (mem.length) {
       const f = filterByMember(mem);
-      if (f.length) return f;
+      if (f.length) return { list: f, durableOnly: false };
     }
-    const offline = await getOfflineList(
-      () => getState().chats,
-      "chats",
-      (items) => hydrateLists({ chats: items }),
-    );
-    return filterByMember(offline);
+    // Read the mirror DIRECTLY (bypasses memory shadowing)
+    const saved = await getSavedList<Chat>("chats");
+    if (saved.length) {
+      hydrateLists({ chats: saved });
+      const f = filterByMember(saved);
+      return { list: f.length ? f : saved, durableOnly: true };
+    }
+    return { list: mem.length ? filterByMember(mem).length ? filterByMember(mem) : mem : [], durableOnly: true };
   };
 
-  // Offline: serve instantly from durable cache
+  // Offline: serve instantly from durable cache with live avatar URLs
   if (typeof window !== "undefined" && !navigator.onLine) {
-    return getCached();
+    const { list } = await getCached();
+    return rehydrateChatAvatars(list);
   }
 
-  // Online cache-first: if we have warm data, return it instantly and refresh in bg
+  // Online cache-first: warm cache → instant paint + background refresh
   const cached = await getCached();
   const doBgRefresh = async () => {
     try {
@@ -89,10 +118,7 @@ export async function listChats(userId: string): Promise<Chat[]> {
         .eq("user_id", userId);
       if (membershipError || !membershipRows) return;
       const chatIds = membershipRows.map((row) => row.chat_id);
-      if (!chatIds.length) {
-        setState((s) => { s.chats = []; });
-        return;
-      }
+      if (!chatIds.length) return;
       const { data: chats, error: chatError } = await supabase
         .from("chats")
         .select("*")
@@ -111,16 +137,17 @@ export async function listChats(userId: string): Promise<Chat[]> {
         return remoteChat;
       });
       setState((s) => { s.chats = remoteChats; });
-      saveList("chats", remoteChats);
+      saveList("chats", remoteChats); // raw paths — durable
       publish("chats:changed");
     } catch (e) {
       console.warn("Background chat refresh failed:", e);
     }
   };
 
-  if (cached.length) {
+  if (cached.list.length) {
     void doBgRefresh();
-    return cached;
+    // Display copy gets resolved avatars; memory keeps raw for durability
+    return rehydrateChatAvatars(cached.list);
   }
 
   // Cold start with no cache — await network
@@ -152,7 +179,7 @@ export async function listChats(userId: string): Promise<Chat[]> {
           });
           setState((s) => { s.chats = remoteChats; });
           saveList("chats", remoteChats);
-          return remoteChats;
+          return rehydrateChatAvatars(remoteChats);
         }
       } else {
         return [];
@@ -161,20 +188,38 @@ export async function listChats(userId: string): Promise<Chat[]> {
   } catch (error) {
     console.warn("Unable to load remote chats, returning cached chats:", error);
   }
-  return cached;
+  return rehydrateChatAvatars(cached.list);
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const memoryChat = getState().chats.find((c) => c.id === id);
-    if (memoryChat) return memoryChat;
+  const findInMemory = () => getState().chats.find((c) => c.id === id);
+  const findInMirror = async (): Promise<Chat | undefined> => {
+    // DIRECT durable read — memory may be stale/partial and must not shadow it
+    const saved = await getSavedList<Chat>("chats");
+    if (saved.length) {
+      const hit = saved.find((c) => c.id === id);
+      if (hit) {
+        // merge into memory so subsequent sync reads hit
+        setState((s) => {
+          if (!s.chats.some((c) => c.id === id)) s.chats.push(hit);
+        });
+        return hit;
+      }
+    }
+    // last resort: the legacy hydrate path
     const local = await getOfflineList(
       () => getState().chats,
       "chats",
       (items) => hydrateLists({ chats: items }),
     );
     return local.find((c) => c.id === id);
+  };
+
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const hit = findInMemory() ?? (await findInMirror());
+    return hit ? resolveChatAvatar(hit) : undefined;
   }
+
   try {
     const supabase = ensureSupabase();
     const { data: chatRow, error: chatError } = await supabase
@@ -199,27 +244,21 @@ export async function getChat(id: string): Promise<Chat | undefined> {
         group = groupRow ?? null;
       }
       const remoteChat = mapChat(chatRow, members, group);
-      const cached = getState().chats.find((c) => c.id === id);
+      const cached = findInMemory();
       if (cached?.visibility) remoteChat.visibility = cached.visibility;
       setState((s) => {
         const idx = s.chats.findIndex((c) => c.id === id);
         if (idx >= 0) s.chats[idx] = remoteChat;
         else s.chats.push(remoteChat);
       });
-      return remoteChat;
+      saveList("chats", getState().chats); // raw paths — durable
+      return resolveChatAvatar(remoteChat);
     }
   } catch (error) {
     console.warn("Unable to load remote chat, returning cached chat:", error);
   }
-  // Fallback: in-memory snapshot first, then the durable IndexedDB mirror
-  const memoryChat = getState().chats.find((c) => c.id === id);
-  if (memoryChat) return memoryChat;
-  const local = await getOfflineList(
-    () => getState().chats,
-    "chats",
-    (items) => hydrateLists({ chats: items }),
-  );
-  return local.find((c) => c.id === id);
+  const hit = findInMemory() ?? (await findInMirror());
+  return hit ? resolveChatAvatar(hit) : undefined;
 }
 
 export async function getOrCreateDM(userA: string, userB: string): Promise<Chat> {

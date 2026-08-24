@@ -3,7 +3,7 @@ import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 import { resolveMedia, primeMediaCache, getCachedMediaObjectUrl } from "@/lib/mediaCache";
-import { getOfflineList, saveList, addAction, getActions, removeAction } from "@/lib/offlineStore";
+import { getOfflineList, getSavedList, saveList, addAction, getActions, removeAction } from "@/lib/offlineStore";
 import { hydrateLists } from "@/lib/mockStore";
 import { channelAvatarFallback, userAvatarFallback } from "@/lib/avatar";
 import { registerActionDrain, initConnectivityWatcher } from "@/stores/syncStore";
@@ -107,6 +107,12 @@ export async function listChannels(): Promise<Channel[]> {
   const getCached = async (): Promise<Channel[]> => {
     const mem = getState().channels;
     if (mem.length) return mem;
+    // DIRECT durable read first — memory may be empty-stale
+    const saved = await getSavedList<Channel>("channels");
+    if (saved.length) {
+      hydrateLists({ channels: saved });
+      return saved;
+    }
     return getOfflineList(
       () => getState().channels,
       "channels",
@@ -138,9 +144,16 @@ export async function listChannels(): Promise<Channel[]> {
         if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
         return remoteChannel;
       });
-      remoteChannels = await resolveChannelAvatars(remoteChannels);
+      // Persist DURABLE raw-path version; resolve avatars for display only.
       setState((s) => { s.channels = remoteChannels; });
       saveList("channels", remoteChannels);
+      remoteChannels = await resolveChannelAvatars(remoteChannels);
+      setState((s) => {
+        s.channels = s.channels.map((c) => {
+          const r = remoteChannels.find((x) => x.id === c.id);
+          return r ? { ...c, avatar: r.avatar, wallpaper: r.wallpaper } : c;
+        });
+      });
       publish("channels:changed");
     } catch (e) {
       console.warn("Background channel refresh failed:", e);
@@ -168,35 +181,51 @@ export async function listChannels(): Promise<Channel[]> {
         if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
         return remoteChannel;
       });
-      remoteChannels = await resolveChannelAvatars(remoteChannels);
+      // Durable raw version persisted before display resolution
       setState((s) => { s.channels = remoteChannels; });
       saveList("channels", remoteChannels);
+      remoteChannels = await resolveChannelAvatars(remoteChannels);
+      setState((s) => {
+        s.channels = s.channels.map((c) => {
+          const r = remoteChannels.find((x) => x.id === c.id);
+          return r ? { ...c, avatar: r.avatar, wallpaper: r.wallpaper } : c;
+        });
+      });
       return remoteChannels;
     }
     if (channelError) console.error("listChannels: failed to query Supabase channels", channelError);
   } catch (error) {
     console.warn("Unable to load remote channels, returning cached channels:", error);
   }
-  const fallbackChannels = await getOfflineList(
-    () => getState().channels,
-    "channels",
-    (items) => hydrateLists({ channels: items }),
-  );
+  const fallbackChannels = await getCached();
   console.warn(`[Supabase offline] Returning ${fallbackChannels.length} cached/seeded channels`);
   return fallbackChannels;
 }
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
-  ensureSeed(); // Ensure seed data is available as fallback
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const cached = getState().channels.find((c) => c.id === id);
-    if (cached) return cached;
+  ensureSeed();
+  const findInMemory = () => getState().channels.find((c) => c.id === id);
+  const findInMirror = async (): Promise<Channel | undefined> => {
+    // DIRECT durable read — memory must not shadow the mirror
+    const saved = await getSavedList<Channel>("channels");
+    if (saved.length) {
+      const hit = saved.find((c) => c.id === id);
+      if (hit) {
+        setState((s) => { if (!s.channels.some((c) => c.id === id)) s.channels.push(hit); });
+        return hit;
+      }
+    }
     const local = await getOfflineList(
       () => getState().channels,
       "channels",
       (items) => hydrateLists({ channels: items }),
     );
     return local.find((c) => c.id === id);
+  };
+
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const hit = findInMemory() ?? (await findInMirror());
+    return hit;
   }
   try {
     const supabase = ensureSupabase();
@@ -216,30 +245,33 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
         .select("user_id")
         .eq("channel_id", id)
         .eq("is_admin", true);
-      
+
       const members = (memberRows ?? []).map((row) => row.user_id);
       const adminIds = (adminRows ?? []).map((row) => row.user_id);
       const allMembers = [channelRow.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
-      const cached = getState().channels.find((c) => c.id === id);
+      const cached = findInMemory();
       const remoteChannel = mapChannel(channelRow, allMembers, adminIds);
       if (cached?.visibility) remoteChannel.visibility = cached.visibility;
-      if (!isFullUrl(remoteChannel.avatar)) {
-        remoteChannel.avatar = await resolveMedia(
-          () => getImageUrl("channel-media", remoteChannel.avatar as string),
-          remoteChannel.avatar,
-        );
-      }
-      if (remoteChannel.wallpaper && !isFullUrl(remoteChannel.wallpaper)) {
-        remoteChannel.wallpaper = await resolveMedia(
-          () => getImageUrl("channel-media", remoteChannel.wallpaper as string),
-          remoteChannel.wallpaper,
-        );
-      }
+      // Persist durable raw version FIRST (paths survive reloads)
       setState((s) => {
         const idx = s.channels.findIndex((c) => c.id === id);
         if (idx >= 0) s.channels[idx] = remoteChannel;
         else s.channels.push(remoteChannel);
       });
+      saveList("channels", getState().channels);
+      // Then resolve display URLs for the returned copy only
+      if (!isFullUrl(remoteChannel.avatar)) {
+        remoteChannel.avatar = await resolveMedia(
+          () => getImageUrl("channel-media", remoteChannel.avatar as string),
+          remoteChannel.avatar,
+        ).catch(() => remoteChannel.avatar);
+      }
+      if (remoteChannel.wallpaper && !isFullUrl(remoteChannel.wallpaper)) {
+        remoteChannel.wallpaper = await resolveMedia(
+          () => getImageUrl("channel-media", remoteChannel.wallpaper as string),
+          remoteChannel.wallpaper,
+        ).catch(() => remoteChannel.wallpaper);
+      }
       return remoteChannel;
     }
 
@@ -249,16 +281,10 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
   } catch (error) {
     console.error("getChannel: exception, falling back to cached channel:", error);
   }
-  
-  const cached = getState().channels.find((c) => c.id === id);
-  if (cached) return cached;
-  console.warn(`[Supabase offline] Returning cached/seeded channel for ID ${id}`);
-  const local = await getOfflineList(
-    () => getState().channels,
-    "channels",
-    (items) => hydrateLists({ channels: items }),
-  );
-  return local.find((c) => c.id === id);
+
+  const hit = findInMemory() ?? (await findInMirror());
+  if (hit) console.warn(`[Supabase offline] Returning cached/seeded channel for ID ${id}`);
+  return hit;
 }
 
 export async function createChannel(input: { name: string; description: string; ownerId: string; onlyAdminsPost?: boolean; visibility?: "public" | "private" }) {
@@ -939,6 +965,20 @@ async function hydrateChannelPostMedia(posts: ChannelPost[]): Promise<ChannelPos
   );
 }
 
+/**
+ * Durable mirror read for a single post — bypasses memory shadowing.
+ */
+async function findPostAnywhere(id: string): Promise<ChannelPost | undefined> {
+  const memHit = getState().channelPosts.find((p) => p.id === id);
+  if (memHit) return memHit;
+  const saved = await getSavedList<ChannelPost>("channelPosts");
+  const hit = saved.find((p) => p.id === id);
+  if (hit) {
+    setState((s) => { if (!s.channelPosts.some((p) => p.id === id)) s.channelPosts.push(hit); });
+  }
+  return hit ?? getState().channelPosts.find((p) => p.id === id);
+}
+
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
   ensureSeed();
   const getCachedPosts = async (): Promise<ChannelPost[]> => {
@@ -1092,7 +1132,13 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
 }
 
 export async function getPost(id: string): Promise<ChannelPost | undefined> {
-  ensureSeed(); // Ensure seed data is available as fallback
+  ensureSeed();
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const hit = await findPostAnywhere(id);
+    if (!hit) return undefined;
+    const [resolved] = await hydrateChannelPostMedia([hit]);
+    return resolved;
+  }
   try {
     const supabase = ensureSupabase();
     const { data: post, error } = await supabase
@@ -1111,8 +1157,33 @@ export async function getPost(id: string): Promise<ChannelPost | undefined> {
       const likes = Array.from(new Set((reactions ?? []).map((r: any) => r.user_id)));
 
       const rawImageUrl: string | undefined = post.image_url;
+      // Persist durable path first
+      setState((s) => {
+        const idx = s.channelPosts.findIndex((p) => p.id === id);
+        if (idx >= 0) {
+          s.channelPosts[idx] = { ...s.channelPosts[idx], likes };
+        } else {
+          s.channelPosts.unshift({
+            id: post.id,
+            channelId: post.channel_id,
+            authorId: post.author_id,
+            kind: post.kind,
+            body: post.body,
+            image: rawImageUrl, // raw path — durable
+            likes,
+            views: [],
+            realViewCount: Number(post.view_count) || 0,
+            createdAt: new Date(post.created_at).getTime(),
+            boostedLikes: post.boosted_likes,
+            boostedViews: post.boosted_views,
+            pinned: post.pinned,
+          });
+        }
+      });
+      saveList("channelPosts", getState().channelPosts);
+
       const image = rawImageUrl
-        ? await resolveMedia(() => getImageUrl("channel-media", rawImageUrl), rawImageUrl)
+        ? await resolveMedia(() => getImageUrl("channel-media", rawImageUrl), rawImageUrl).catch(() => rawImageUrl)
         : undefined;
 
       return {

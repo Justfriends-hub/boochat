@@ -71,6 +71,49 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// ── Push: background notifications (WhatsApp-style, app closed) ──────────
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    try { data = { body: event.data ? event.data.text() : "" }; } catch { data = {}; }
+  }
+  const title = data.title || "boochat";
+  const body = data.body || "New message";
+  const url = data.url || "/chats";
+  const tag = data.tag || data.chatId || "boochat-push";
+  const icon = data.icon || "/icons/icon-192.png";
+  const badge = data.badge || "/icons/icon-192.png";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon,
+      badge,
+      tag,
+      renotify: false,
+      requireInteraction: false,
+      data: { url, chatId: data.chatId },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/chats";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        // Focus existing window at target route if already open
+        if (client.url.includes(new URL(url, self.location.origin).pathname) && "focus" in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    }),
+  );
+});
+
 // ── Message: allow clients to trigger skipWaiting ─────────────────────────
 self.addEventListener("message", (e) => {
   if (e.data?.type === "SKIP_WAITING") self.skipWaiting();

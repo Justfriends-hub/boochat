@@ -17,6 +17,7 @@ import { MessageCircle } from "lucide-react";
 import {
   listMessages, sendMessage, editMessage, deleteMessage, forwardMessage,
   subscribeToChat, subscribeToTyping, markChatRead, trackMessageView, getMessageViewers, subscribeToMessageViews,
+  loadOlderMessages,
 } from "@/api/messagesApi";
 import { listChats, getChat, updateChat, requestJoinGroup, approveJoinGroupRequest, rejectJoinGroupRequest } from "@/api/chatsApi";
 import { listUsers, getUser } from "@/api/usersApi";
@@ -49,6 +50,8 @@ export function ChatView({ chatId }: { chatId: string }) {
   const [typing, setTyping] = useState<string | null>(null);
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [messageViewers, setMessageViewers] = useState<Record<string, string[]>>({});
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderExhausted, setOlderExhausted] = useState(false);
 
   const { data: chat, isLoading: chatLoading, isError: chatError } = useQuery({
     queryKey: ["chat", chatId],
@@ -192,6 +195,18 @@ export function ChatView({ chatId }: { chatId: string }) {
     const q = search.toLowerCase();
     return messages.filter((m) => m.body.toLowerCase().includes(q));
   }, [messages, search]);
+
+  // Telegram-style scroll-back: pull the next older page into local cache
+  const onLoadOlder = async () => {
+    if (loadingOlder || olderExhausted || !messages.length) return;
+    setLoadingOlder(true);
+    try {
+      const res = await loadOlderMessages(chatId);
+      if (res.exhausted) setOlderExhausted(true);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
 
   // Virtualization
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -399,6 +414,14 @@ export function ChatView({ chatId }: { chatId: string }) {
           <EmptyState icon={MessageCircle} title="No messages yet" description="Say hello 👋" />
         ) : (
           <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+            {/* Older-history loader (Telegram-style scroll-back) */}
+            {!olderExhausted && messages.length >= 50 && (
+              <div style={{ position: "absolute", top: -44, left: 0, width: "100%" }} className="flex justify-center">
+                <Button variant="ghost" size="sm" disabled={loadingOlder} onClick={onLoadOlder} className="text-xs text-muted-foreground">
+                  {loadingOlder ? "Loading older messages…" : "Load older messages"}
+                </Button>
+              </div>
+            )}
             {virtualizer.getVirtualItems().map((v) => {
               const m = filtered[v.index];
               const prev = filtered[v.index - 1];

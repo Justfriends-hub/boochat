@@ -93,6 +93,32 @@ async function primeChatMessageMedia() {
   } catch {}
 }
 
+/**
+ * Auto-download pass for messages received while the user was away:
+ * listMessages() refreshes each chat's recent window (pulling any new rows),
+ * and priming then stores every image/voice blob locally so airplane-mode
+ * opens replay them instantly — WhatsApp "media auto-download" equivalent.
+ */
+async function syncAndPrimeAwayMessages() {
+  try {
+    const { listMessages } = await import("@/api/messagesApi");
+    const chats = getState().chats;
+    await mapWithConcurrency(chats, CONCURRENCY, async (c) => {
+      try { await listMessages(c.id).catch(() => {}); } catch {}
+    });
+    await primeChatMessageMedia();
+  } catch {}
+}
+
+/** Step 2+3 of the warm pipeline: sync windows, then prime all media kinds. */
+async function syncAndPrimeMessagesAndMedia() {
+  await syncAndPrimeAwayMessages();
+  await idle();
+  await primeAvatars();
+  await primeChannelPostMedia();
+  await primeStatusMedia();
+}
+
 async function primeChannelPostMedia() {
   try {
     const posts = getState().channelPosts;
@@ -225,30 +251,9 @@ export async function warmAllCaches(opts: { force?: boolean; userId?: string } =
 
     // 2) For every chat, ensure its recent message window is cached locally.
     //    listMessages() writes to Dexie via setCachedMessages, so per-chat
-    //    offline history survives airplane mode.
-    try {
-      const chats = getState().chats;
-      const { listMessages } = await import("@/api/messagesApi");
-      await mapWithConcurrency(
-        chats,
-        CONCURRENCY,
-        async (c) => {
-          try {
-            await listMessages(c.id).catch(() => {});
-          } catch {}
-        },
-      );
-    } catch {}
-
-    await idle();
-
-    // 3) Prime media caches for everything we just pulled.
-    //    This downloads each image/voice/video blob once and stores it in
-    //    Cache Storage under its stable storage path, enabling offline replay.
-    await primeAvatars();
-    await primeChatMessageMedia();
-    await primeChannelPostMedia();
-    await primeStatusMedia();
+    //    offline history survives airplane mode. Also auto-downloads media
+    //    for anything that arrived while the user was away.
+    await syncAndPrimeMessagesAndMedia();
   } finally {
     warming = false;
   }

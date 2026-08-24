@@ -2,8 +2,8 @@ import { ensureSupabase } from "@/lib/supabaseClient";
 import { publish } from "@/lib/eventBus";
 import { getState, setState, hydrateLists, normalizeRole, type User } from "@/lib/mockStore";
 import { getImageUrl, batchGetImageUrls } from "@/lib/imageUpload";
-import { resolveMedia } from "@/lib/mediaCache";
-import { getOfflineList, saveList } from "@/lib/offlineStore";
+import { resolveMedia, resolveDisplayUrl } from "@/lib/mediaCache";
+import { getOfflineList, getSavedList, saveList } from "@/lib/offlineStore";
 import { userAvatarFallback } from "@/lib/avatar";
 
 /**
@@ -42,6 +42,31 @@ async function resolveBatchAvatarUrls(profiles: any[]): Promise<User[]> {
   return result;
 }
 
+/**
+ * Re-hydrate cached users for offline display. The durable mirror stores RAW
+ * storage paths (durable across reloads); here we convert them back to live
+ * blob URLs from the device media cache. Dead blob:/signed URLs are swapped
+ * for a deterministic fallback so DPs never render blank offline.
+ */
+export async function rehydrateUserAvatars(users: User[]): Promise<User[]> {
+  return Promise.all(
+    users.map(async (u: any) => {
+      if (u?._avatarPath) {
+        const blob = await resolveDisplayUrl(u._avatarPath).catch(() => undefined);
+        if (blob && !/^https?:\/\//i.test(blob)) {
+          // path resolved from device cache → use it; keep _avatarPath intact
+          return { ...u, avatar: blob };
+        }
+      }
+      // avatar may be stale blob:/signed — verify usability cheaply:
+      if (/^(blob:|data:)/i.test(u.avatar || "")) {
+        return { ...u, avatar: userAvatarFallback(u._avatarPath ?? u.id ?? u.email) };
+      }
+      return u;
+    }),
+  );
+}
+
 function mapProfileSync(profile: any): User {
   // For synchronous mapping, pass through avatar_url as-is.
   // Callers that need a resolved URL should use mapProfileAsync.
@@ -62,7 +87,9 @@ function mapProfileSync(profile: any): User {
     banned: profile.banned ?? false,
     bio: profile.bio ?? undefined,
     isUpgraded: !!profile.is_upgraded,
-  };
+    // Durable raw path — survives reloads; used to re-resolve offline
+    _avatarPath: rawAvatar && !/^https?:\/\//i.test(rawAvatar) ? rawAvatar : undefined,
+  } as User & { _avatarPath?: string };
 }
 
 async function mapProfileAsync(profile: any): Promise<User> {
@@ -107,14 +134,23 @@ export async function listUsers(): Promise<User[]> {
         role: roleMap.get(profile.id) ?? "user",
       }));
 
-      // First pass: sync map so the UI has names/DiceBear avatars immediately
+      // First pass: sync map so the UI has names/DiceBear avatars immediately.
+      // Persist THIS path-preserving version to the durable mirror — resolved
+      // blob:/signed URLs die on reload; raw paths rehydrate from device cache.
       const syncUsers = normalizedProfiles.map(mapProfileSync);
       setState((s) => { s.users = syncUsers; });
       saveList("users", syncUsers);
 
       // Second pass: batch resolve any storage-path avatars asynchronously
+      // (display only — the mirror keeps the raw paths)
       resolveBatchAvatarUrls(normalizedProfiles).then((resolved) => {
-        setState((s) => { s.users = resolved; });
+        setState((s) => {
+          // merge: keep _avatarPath from sync version
+          s.users = s.users.map((u: any) => {
+            const r = resolved.find((x) => x.id === u.id);
+            return r ? { ...u, avatar: r.avatar } : u;
+          });
+        });
         publish("users:changed");
       }).catch(() => {});
 
@@ -124,7 +160,14 @@ export async function listUsers(): Promise<User[]> {
     console.warn("Offline or network error fetching users, returning cached users:", err);
   }
   const memoryUsers = getState().users;
-  if (memoryUsers.length) return memoryUsers;
+  if (memoryUsers.length) {
+    return rehydrateUserAvatars(memoryUsers);
+  }
+  const saved = await getSavedList<User & { _avatarPath?: string }>("users");
+  if (saved.length) {
+    hydrateLists({ users: saved });
+    return rehydrateUserAvatars(saved);
+  }
   return getOfflineList(
     () => getState().users,
     "users",
@@ -136,6 +179,14 @@ export async function getUser(id: string): Promise<User | undefined> {
   // Check cache first for instant response
   const cached = getState().users.find((u) => u.id === id);
   if (cached && /^https?:\/\//i.test(cached.avatar || "")) return cached;
+
+  // Offline: serve the cached profile with a live avatar URL immediately
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const local = cached ?? (await getSavedList<User & { _avatarPath?: string }>("users")).find((u) => u.id === id);
+    if (!local) return undefined;
+    const [rehydrated] = await rehydrateUserAvatars([local]);
+    return rehydrated;
+  }
 
   try {
     const supabase = ensureSupabase();
@@ -168,7 +219,10 @@ export async function getUser(id: string): Promise<User | undefined> {
   } catch (err) {
     console.warn("Offline or network error fetching user, returning cached user:", err);
   }
-  return getState().users.find((u) => u.id === id);
+  const fallback = getState().users.find((u) => u.id === id);
+  if (!fallback) return undefined;
+  const [rehydrated] = await rehydrateUserAvatars([fallback]);
+  return rehydrated;
 }
 
 export async function updateUser(id: string, patch: Partial<User>) {

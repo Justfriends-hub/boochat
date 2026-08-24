@@ -113,6 +113,42 @@ export async function resolveMedia(
 }
 
 /**
+ * Offline-safe avatar/media resolver for cached records.
+ *
+ * Given a value that may be a stale blob:/signed URL (dead after reload) or a
+ * stable storage path, returns a LIVE display URL:
+ *   storage path  → device cache blob (offline OK), else the path itself
+ *   http(s) URL   → passed through (may fail offline — caller should fall back)
+ *   blob:/data:   → treated as stale; if a fallback seed is provided a
+ *                   deterministic DiceBear URL is returned instead so UI never
+ *                   renders a broken image.
+ */
+export async function resolveDisplayUrl(
+  value: string | undefined | null,
+  fallbackSeed?: string | null,
+): Promise<string | undefined> {
+  if (!value) {
+    return fallbackSeed ? userAvatarFallbackFor(fallbackSeed) : undefined;
+  }
+  if (/^(blob:|data:)/i.test(value)) {
+    // Stale session URL from a previous load — unrecoverable offline.
+    return fallbackSeed ? userAvatarFallbackFor(fallbackSeed) : undefined;
+  }
+  if (/^https?:\/\//i.test(value)) return value;
+  // Stable storage path → replay from device cache when possible.
+  const cached = await getCachedMediaObjectUrl(value);
+  if (cached) return cached;
+  return value;
+}
+
+// Local import avoided at module top to keep mediaCache dependency-free.
+function userAvatarFallbackFor(seed: string): string {
+  let h = 5381;
+  for (let i = 0; i < seed.length; i++) h = (((h << 5) + h + seed.charCodeAt(i)) | 0) >>> 0;
+  return `https://api.dicebear.com/7.x/avataaars/svg?seed=u${h.toString(36)}`;
+}
+
+/**
  * Fire-and-forget storage of an already-resolved signed URL (used when a user
  * views a story so the next open replays from the device).
  */

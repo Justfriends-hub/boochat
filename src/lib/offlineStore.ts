@@ -325,3 +325,20 @@ export async function getOfflineList<T>(
   } catch {}
   return local;
 }
+
+/**
+ * DIRECT IndexedDB mirror read — bypasses the in-memory store entirely.
+ *
+ * Critical for offline correctness: memory may hold stale or partial data
+ * (demo seeds, another account, an earlier fetch) which would SHADOW the
+ * durable mirror via getOfflineList. Single-item lookups (getChat by id)
+ * must always consult this durable copy too.
+ */
+export async function getSavedList<T>(key: SavedListKey): Promise<T[]> {
+  try {
+    const saved = await getAppState<T[]>(`list:${key}`);
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}

@@ -161,6 +161,52 @@ export async function listMessages(chatId: string): Promise<Message[]> {
   return hydrateLocalMedia(chatId);
 }
 
+/**
+ * Fetch one older page of history (before the oldest cached message) and
+ * merge into L1+L2. Enables Telegram-style infinite scroll-back; every page
+ * pulled becomes permanently available offline.
+ */
+export async function loadOlderMessages(chatId: string): Promise<{ added: number; exhausted: boolean }> {
+  const cached = getCachedMessages(chatId);
+  const oldest = cached.length ? cached[0].createdAt : Date.now();
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("chat_id", chatId)
+      .lt("created_at", new Date(oldest).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(MESSAGE_FETCH_LIMIT);
+    if (error || !data) return { added: 0, exhausted: true };
+
+    if (!data.length) return { added: 0, exhausted: true };
+
+    const olderMsgs = data.map(mapMessage).reverse(); // chronological
+
+    // Resolve media paths → cache-backed blob URLs (downloads once)
+    const mediaPaths = olderMsgs.map((m) => m.imagePath ?? null);
+    const mediaUrls = await batchGetImageUrls("chat-media", mediaPaths);
+    const resolved = await Promise.all(
+      olderMsgs.map(async (m, i) => {
+        if ((m.kind === "image" || m.kind === "voice") && mediaPaths[i] && mediaUrls[i]) {
+          return { ...m, body: await resolveMedia(() => Promise.resolve(mediaUrls[i] as string), mediaPaths[i]) };
+        }
+        return m;
+      }),
+    );
+
+    // Merge WITHOUT dropping newer cached rows: prepend then cap
+    const merged = [...resolved, ...cached];
+    setCachedMessages(chatId, merged);
+    publish(`chat:${chatId}`);
+    return { added: resolved.length, exhausted: data.length < MESSAGE_FETCH_LIMIT };
+  } catch (err) {
+    console.warn("loadOlderMessages failed:", err);
+    return { added: 0, exhausted: false };
+  }
+}
+
 // Optimistic & Offline-first Message Dispatch
 export async function sendMessage(input: {
   chatId: string;

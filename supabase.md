@@ -701,6 +701,58 @@ grant all on
 to service_role;
 ```
 
+## 14. Web Push — background notifications (WhatsApp-style)
+
+Paste this after all tables above. Generates a `push_subscriptions` table that stores each device's Web Push endpoint. A `messages` insert triggers an Edge Function that fans out a push to every recipient's devices even when the app is closed.
+
+```sql
+-- Push subscriptions: one row per browser/device that enabled notifications.
+-- p256dh/auth are the VAPID encryption keys from the browser's PushSubscription.
+create table if not exists public.push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subscriptions_user_id_idx on public.push_subscriptions (user_id);
+
+alter table public.push_subscriptions enable row level security;
+drop policy if exists "push own" on public.push_subscriptions;
+create policy "push own" on public.push_subscriptions for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+grant select, insert, delete on public.push_subscriptions to authenticated;
+grant all on public.push_subscriptions to service_role;
+
+-- Allow Realtime to broadcast the new message event that the Edge Function listens to
+-- (already added in §10: public.messages in supabase_realtime publication).
+```
+
+Generate VAPID keys once (locally, never commit private key):
+```bash
+npx web-push generate-vapid-keys
+# → publicKey  = VAPID_PUBLIC_KEY
+# → privateKey = VAPID_PRIVATE_KEY
+```
+Set them:
+```bash
+supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:you@example.com
+# client needs only the public key:
+# .env: VITE_VAPID_PUBLIC_KEY=...
+```
+
+Edge Function `supabase/functions/push-on-message/index.ts` (see repo `supabase/functions/push-on-message/index.ts` in this commit) handles fan-out. Deploy:
+```bash
+supabase functions deploy push-on-message --no-verify-jwt
+```
+Then enable the DB webhook (Dashboard → Database → Webhooks) on `public.messages` INSERT → `https://<project>.supabase.co/functions/v1/push-on-message` with service_role auth, or let the function poll via Realtime — the checked-in function supports both HTTP webhook and Realtime fallback.
+
+Verify: in app, `Enable notifications` banner → allow → `push_subscriptions` row appears → send DM from incognito → OS notification appears even with app closed → tapping opens `/chats/<chatId>`.
+
+
 ---
 
 ## Connecting the frontend

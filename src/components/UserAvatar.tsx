@@ -1,14 +1,26 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { useState, useEffect } from "react";
 
 export function UserAvatar({
   src, name, size = 40, online, className,
 }: { src?: string; name: string; size?: number; online?: boolean; className?: string }) {
+  const [broken, setBroken] = useState(false);
+  // Reset the broken flag whenever a new src arrives
+  useEffect(() => { setBroken(false); }, [src]);
   const initials = name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
+  const usable = src && !broken ? src : undefined;
   return (
     <div className={cn("relative shrink-0", className)} style={{ width: size, height: size }}>
       <Avatar style={{ width: size, height: size }}>
-        <AvatarImage src={src} alt={name} loading="lazy" decoding="async" />
+        <AvatarImage
+          key={src || "none"}
+          src={usable}
+          alt={name}
+          loading="lazy"
+          decoding="async"
+          onError={() => setBroken(true)}
+        />
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
       {online && (
