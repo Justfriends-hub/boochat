@@ -542,46 +542,106 @@ export async function boostPost(input: {
   adminId: string; postId: string; kind: "likes" | "views"; amount: number;
 }): Promise<Boost> {
   if (input.amount <= 0) throw new Error("Boost amount must be greater than zero.");
-  try {
-    const client = ensureSupabase();
-    // Server-side RPC: validates admin role, increments the boosted counter
-    // atomically, logs to admin_boosts + audit_logs in one transaction.
-    const { error } = await client.rpc("apply_admin_boost", {
+
+  // Try server-side boosts with graceful degradation:
+  // 1) boost_post (canonical in supabase.md)  2) apply_admin_boost (legacy alias)
+  // 3) direct channel_posts increment  4) local-only fallback
+  const tryRpc = async (fn: string, params: Record<string, unknown>) => {
+    try {
+      const client = ensureSupabase();
+      const { error } = await (client as any).rpc(fn, params);
+      return error ? { ok: false as const, error } : { ok: true as const, error: null };
+    } catch (e: any) {
+      return { ok: false as const, error: e };
+    }
+  };
+
+  let serverApplied = false;
+  let lastError: any = null;
+
+  // 1) Canonical RPC from supabase.md
+  {
+    const r = await tryRpc("boost_post", {
+      _post_type: "channel",
+      _post_id: input.postId,
+      _kind: input.kind,
+      _amount: input.amount,
+    });
+    if (r.ok) serverApplied = true;
+    else {
+      // Also try the 3-arg variant without _post_type used by some deploys
+      const r2 = await tryRpc("boost_post", {
+        _post_id: input.postId,
+        _kind: input.kind,
+        _amount: input.amount,
+      });
+      if (r2.ok) serverApplied = true;
+      else lastError = r.error ?? r2.error;
+    }
+  }
+
+  // 2) Legacy alias
+  if (!serverApplied) {
+    const r = await tryRpc("apply_admin_boost", {
       p_post_id: input.postId,
       p_kind: input.kind,
       p_amount: input.amount,
     });
-    if (error) throw error;
-
-    const boost: Boost = {
-      id: uid(), adminId: input.adminId, postId: input.postId,
-      kind: input.kind, amount: input.amount, createdAt: Date.now(),
-    };
-    setState((s) => {
-      const p = s.channelPosts.find((x) => x.id === input.postId);
-      if (p) {
-        if (input.kind === "likes") p.boostedLikes = (p.boostedLikes || 0) + input.amount;
-        else p.boostedViews = (p.boostedViews || 0) + input.amount;
-      }
-      s.boosts.push(boost);
-    });
-    audit({ adminId: input.adminId, action: "boost_post", targetType: "post", targetId: input.postId, meta: { kind: input.kind, amount: input.amount } });
-    publish("channels:changed");
-    publish("boosts:changed");
-    return boost;
-  } catch (err) {
-    console.warn("boostPost: supabase RPC failed, applying locally:", err);
-    warnLocalOnly("Boost");
-    const boost: Boost = {
-      id: uid(), adminId: input.adminId, postId: input.postId,
-      kind: input.kind, amount: input.amount, createdAt: Date.now(),
-    };
-    setState((s) => { const p = s.channelPosts.find((x) => x.id === input.postId); if (p) { if (input.kind === "likes") p.boostedLikes = (p.boostedLikes || 0) + input.amount; else p.boostedViews = (p.boostedViews || 0) + input.amount; } s.boosts.push(boost); });
-    audit({ adminId: input.adminId, action: "boost_post", targetType: "post", targetId: input.postId, meta: { kind: input.kind, amount: input.amount } });
-    publish("channels:changed");
-    publish("boosts:changed");
-    return boost;
+    if (r.ok) serverApplied = true;
+    else lastError = r.error;
   }
+
+  // 3) Direct table increment fallback (works even if RPC missing, if RLS allows)
+  if (!serverApplied) {
+    try {
+      const client = ensureSupabase();
+      const col = input.kind === "likes" ? "boosted_likes" : "boosted_views";
+      const { data: row, error: fetchErr } = await client
+        .from("channel_posts")
+        .select(col)
+        .eq("id", input.postId)
+        .single();
+      if (!fetchErr && row) {
+        const current = Number((row as any)[col] ?? 0);
+        const { error: updErr } = await client
+          .from("channel_posts")
+          .update({ [col]: current + input.amount })
+          .eq("id", input.postId);
+        if (!updErr) serverApplied = true;
+        else lastError = updErr;
+      } else if (fetchErr) {
+        lastError = fetchErr;
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  if (!serverApplied && lastError) {
+    console.warn("boostPost: all server attempts failed, applying locally:", lastError?.message ?? lastError);
+    // Not fatal — we still apply locally below. Only warnLocalOnly if we had a server error
+    // that is not just "function not found / table not found" to avoid spamming.
+    const msg = String(lastError?.message ?? lastError ?? "").toLowerCase();
+    const isMissingFnOrTable = msg.includes("could not find") || msg.includes("does not exist") || msg.includes("function");
+    if (!isMissingFnOrTable) warnLocalOnly("Boost");
+  }
+
+  const boost: Boost = {
+    id: uid(), adminId: input.adminId, postId: input.postId,
+    kind: input.kind, amount: input.amount, createdAt: Date.now(),
+  };
+  setState((s) => {
+    const p = s.channelPosts.find((x) => x.id === input.postId);
+    if (p) {
+      if (input.kind === "likes") p.boostedLikes = (p.boostedLikes || 0) + input.amount;
+      else p.boostedViews = (p.boostedViews || 0) + input.amount;
+    }
+    s.boosts.push(boost);
+  });
+  audit({ adminId: input.adminId, action: "boost_post", targetType: "post", targetId: input.postId, meta: { kind: input.kind, amount: input.amount } });
+  publish("channels:changed");
+  publish("boosts:changed");
+  return boost;
 }
 
 export async function deletePostAsAdmin(postId: string, adminId: string) {

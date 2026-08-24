@@ -104,6 +104,14 @@ async function fetchChannelMembers(channelIds: string[]) {
 
 export async function listChannels(): Promise<Channel[]> {
   ensureSeed(); // Ensure seed data is available as fallback
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const fallback = await getOfflineList(
+      () => getState().channels,
+      "channels",
+      (items) => hydrateLists({ channels: items }),
+    );
+    if (fallback.length) return fallback;
+  }
   try {
     const supabase = ensureSupabase();
     const { data: channels, error: channelError } = await supabase
@@ -153,6 +161,16 @@ export async function listChannels(): Promise<Channel[]> {
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
   ensureSeed(); // Ensure seed data is available as fallback
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const cached = getState().channels.find((c) => c.id === id);
+    if (cached) return cached;
+    const local = await getOfflineList(
+      () => getState().channels,
+      "channels",
+      (items) => hydrateLists({ channels: items }),
+    );
+    return local.find((c) => c.id === id);
+  }
   try {
     const supabase = ensureSupabase();
     const { data: channelRow, error: channelError } = await supabase

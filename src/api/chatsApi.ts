@@ -57,6 +57,16 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
+  // Offline cold-start: don't waste time hitting Supabase when we know we're offline
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const memoryChats = getState().chats;
+    if (memoryChats.length) return memoryChats;
+    return getOfflineList(
+      () => getState().chats,
+      "chats",
+      (items) => hydrateLists({ chats: items }),
+    );
+  }
   try {
     const supabase = ensureSupabase();
     const { data: membershipRows, error: membershipError } = await supabase
@@ -108,6 +118,16 @@ export async function listChats(userId: string): Promise<Chat[]> {
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const memoryChat = getState().chats.find((c) => c.id === id);
+    if (memoryChat) return memoryChat;
+    const local = await getOfflineList(
+      () => getState().chats,
+      "chats",
+      (items) => hydrateLists({ chats: items }),
+    );
+    return local.find((c) => c.id === id);
+  }
   try {
     const supabase = ensureSupabase();
     const { data: chatRow, error: chatError } = await supabase

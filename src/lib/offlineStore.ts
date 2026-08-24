@@ -57,6 +57,31 @@ export async function initOfflineStore(): Promise<void> {
     outboxCache.length = 0;
     outboxCache.push(...pendingMsgs);
 
+    // Pre-hydrate the durable list mirror into the in-memory mockStore so
+    // offline cold-starts (no network) have chats/channels/users/posts
+    // immediately — without waiting for __root's separate hydrateLists call
+    // that races with early listChats()/listChannels() queries.
+    try {
+      const { hydrateLists } = await import("./mockStore");
+      const savedLists = await Promise.all([
+        db.appState.get("list:users"),
+        db.appState.get("list:chats"),
+        db.appState.get("list:channels"),
+        db.appState.get("list:channelPosts"),
+        db.appState.get("list:statuses"),
+      ]);
+      const [u, ch, chn, posts, st] = savedLists.map((r) => (r?.value as any[] | undefined));
+      if (u?.length || ch?.length || chn?.length || posts?.length || st?.length) {
+        hydrateLists({
+          users: u,
+          chats: ch,
+          channels: chn,
+          channelPosts: posts,
+          statuses: st,
+        });
+      }
+    } catch {}
+
     publish("offlineStore:ready");
   } catch (err) {
     console.warn("[offlineStore] Failed to initialize from IndexedDB:", err);
