@@ -295,6 +295,12 @@ async function refreshCurrentUser(userId: string) {
       const { scheduleWarmAllCaches } = await import("@/lib/offlineSync");
       scheduleWarmAllCaches(user.id);
     } catch {}
+    // Re-assert push subscription for this device after a fresh login
+    // (idempotent — no-ops unless permission is already granted).
+    try {
+      const { ensurePushSubscriptionIfGranted } = await import("@/lib/push");
+      void ensurePushSubscriptionIfGranted();
+    } catch {}
   } catch (error) {
     console.warn("Unable to refresh current user:", error);
     // Offline / network failure: restore the last-known session if we have one

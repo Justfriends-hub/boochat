@@ -703,7 +703,9 @@ to service_role;
 
 ## 14. Web Push — background notifications (WhatsApp-style)
 
-Paste this after all tables above. Generates a `push_subscriptions` table that stores each device's Web Push endpoint. A `messages` insert triggers an Edge Function that fans out a push to every recipient's devices even when the app is closed.
+> Verified against the live DB (`mycurrentschema.sql`): `push_subscriptions` does **not** exist yet, so this migration is purely additive. `messages(chat_id, sender_id, kind, body)` matches what the Edge Function reads; `chat_members`/`profiles`/`chats(name,type)` are present.
+
+Paste this after all tables above. Creates a `push_subscriptions` table storing each device's Web Push endpoint. An Edge Function fans out a push to every chat recipient's devices when a message lands — even with the app closed.
 
 ```sql
 -- Push subscriptions: one row per browser/device that enabled notifications.
@@ -726,9 +728,6 @@ create policy "push own" on public.push_subscriptions for all to authenticated
 
 grant select, insert, delete on public.push_subscriptions to authenticated;
 grant all on public.push_subscriptions to service_role;
-
--- Allow Realtime to broadcast the new message event that the Edge Function listens to
--- (already added in §10: public.messages in supabase_realtime publication).
 ```
 
 Generate VAPID keys once (locally, never commit private key):
@@ -744,13 +743,17 @@ supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=ma
 # .env: VITE_VAPID_PUBLIC_KEY=...
 ```
 
-Edge Function `supabase/functions/push-on-message/index.ts` (see repo `supabase/functions/push-on-message/index.ts` in this commit) handles fan-out. Deploy:
+Edge Function `supabase/functions/push-on-message/index.ts` (checked in) reads `messages`/`chat_members`/`profiles`/`chats` per the live schema and fans out via `web-push`, auto-deleting expired (404/410) subscriptions. Deploy:
 ```bash
 supabase functions deploy push-on-message --no-verify-jwt
 ```
-Then enable the DB webhook (Dashboard → Database → Webhooks) on `public.messages` INSERT → `https://<project>.supabase.co/functions/v1/push-on-message` with service_role auth, or let the function poll via Realtime — the checked-in function supports both HTTP webhook and Realtime fallback.
 
-Verify: in app, `Enable notifications` banner → allow → `push_subscriptions` row appears → send DM from incognito → OS notification appears even with app closed → tapping opens `/chats/<chatId>`.
+Wire the trigger — Database Webhook (Dashboard → Database → Webhooks):
+- Table `public.messages`, Event `Insert`, HTTP POST
+- URL: `https://<project>.supabase.co/functions/v1/push-on-message`
+- The function also accepts `{ record }` JSON directly for curl testing.
+
+Verify: in app, `Enable notifications` banner → allow → row appears in `push_subscriptions` → send DM from a second account/incognito → OS notification appears even with the app closed → tapping opens `/chats/<chatId>`.
 
 
 ---

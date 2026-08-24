@@ -16,10 +16,12 @@ import { initStore, hydrateLists, type User, type Chat, type Channel, type Chann
 import { useTheme } from "@/hooks/useTheme";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { InstallPromptBanner } from "@/components/InstallPromptBanner";
+import { PushPrompt } from "@/components/PushPrompt";
 import { initOfflineStore, getAppState, setAppState } from "@/lib/offlineStore";
 import { pruneMediaCache } from "@/lib/mediaCache";
 import { initConnectivityWatcher } from "@/stores/syncStore";
 import { scheduleWarmAllCaches } from "@/lib/offlineSync";
+import { ensurePushSubscriptionIfGranted } from "@/lib/push";
 
 function NotFoundComponent() {
   return (
@@ -173,6 +175,9 @@ function RootComponent() {
           if (auth) scheduleWarmAllCaches(auth.id);
           else scheduleWarmAllCaches();
         } catch {}
+        // If permission was previously granted, re-assert this device's
+        // push subscription (idempotent; no-ops when denied/unsupported).
+        try { void ensurePushSubscriptionIfGranted(); } catch {}
       })
       .catch(console.warn);
     pruneMediaCache().catch(() => {});
@@ -215,6 +220,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <OfflineBanner />
       <InstallPromptBanner />
+      <PushPrompt />
       <RouteTracker />
       <Outlet />
       <Toaster richColors position="top-center" />
