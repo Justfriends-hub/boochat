@@ -2,7 +2,7 @@ import { getState, setState, uid, ensureSeed, type Channel, type ChannelPost, ty
 import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
-import { resolveMedia, primeMediaCache } from "@/lib/mediaCache";
+import { resolveMedia, primeMediaCache, getCachedMediaObjectUrl } from "@/lib/mediaCache";
 import { getOfflineList, saveList, addAction, getActions, removeAction } from "@/lib/offlineStore";
 import { hydrateLists } from "@/lib/mockStore";
 import { channelAvatarFallback, userAvatarFallback } from "@/lib/avatar";
@@ -103,50 +103,77 @@ async function fetchChannelMembers(channelIds: string[]) {
 }
 
 export async function listChannels(): Promise<Channel[]> {
-  ensureSeed(); // Ensure seed data is available as fallback
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const fallback = await getOfflineList(
+  ensureSeed();
+  const getCached = async (): Promise<Channel[]> => {
+    const mem = getState().channels;
+    if (mem.length) return mem;
+    return getOfflineList(
       () => getState().channels,
       "channels",
       (items) => hydrateLists({ channels: items }),
     );
-    if (fallback.length) return fallback;
+  };
+
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const f = await getCached();
+    if (f.length) return f;
+    return f;
   }
+
+  const cached = await getCached();
+  const doBg = async () => {
+    try {
+      const supabase = ensureSupabase();
+      const { data: channels, error: channelError } = await supabase.from("channels").select("*").order("created_at", { ascending: false });
+      if (channelError || !channels) return;
+      const channelIds = channels.map((c) => c.id);
+      const memberRows = await fetchChannelMembers(channelIds);
+      const adminRows = await fetchChannelAdmins(channelIds);
+      let remoteChannels = channels.map((ch) => {
+        const members = memberRows.filter((row) => row.channel_id === ch.id).map((row) => row.user_id);
+        const adminIds = adminRows.filter((row) => row.channel_id === ch.id).map((row) => row.user_id);
+        const allMembers = [ch.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
+        const cachedOne = getState().channels.find((c) => c.id === ch.id);
+        const remoteChannel = mapChannel(ch, allMembers, adminIds);
+        if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
+        return remoteChannel;
+      });
+      remoteChannels = await resolveChannelAvatars(remoteChannels);
+      setState((s) => { s.channels = remoteChannels; });
+      saveList("channels", remoteChannels);
+      publish("channels:changed");
+    } catch (e) {
+      console.warn("Background channel refresh failed:", e);
+    }
+  };
+
+  if (cached.length) {
+    void doBg();
+    return cached;
+  }
+
   try {
     const supabase = ensureSupabase();
-    const { data: channels, error: channelError } = await supabase
-      .from("channels")
-      .select("*")
-      .order("created_at", { ascending: false });
-
+    const { data: channels, error: channelError } = await supabase.from("channels").select("*").order("created_at", { ascending: false });
     if (!channelError && channels) {
       const channelIds = channels.map((c) => c.id);
       const memberRows = await fetchChannelMembers(channelIds);
       const adminRows = await fetchChannelAdmins(channelIds);
-      
       let remoteChannels = channels.map((ch) => {
-        const members = memberRows
-          .filter((row) => row.channel_id === ch.id)
-          .map((row) => row.user_id);
-        const adminIds = adminRows
-          .filter((row) => row.channel_id === ch.id)
-          .map((row) => row.user_id);
+        const members = memberRows.filter((row) => row.channel_id === ch.id).map((row) => row.user_id);
+        const adminIds = adminRows.filter((row) => row.channel_id === ch.id).map((row) => row.user_id);
         const allMembers = [ch.owner_id, ...members].filter((v, i, a) => a.indexOf(v) === i);
-        const cached = getState().channels.find((c) => c.id === ch.id);
+        const cachedOne = getState().channels.find((c) => c.id === ch.id);
         const remoteChannel = mapChannel(ch, allMembers, adminIds);
-        if (cached?.visibility) remoteChannel.visibility = cached.visibility;
+        if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
         return remoteChannel;
       });
-
       remoteChannels = await resolveChannelAvatars(remoteChannels);
       setState((s) => { s.channels = remoteChannels; });
       saveList("channels", remoteChannels);
       return remoteChannels;
     }
-
-    if (channelError) {
-      console.error("listChannels: failed to query Supabase channels", channelError);
-    }
+    if (channelError) console.error("listChannels: failed to query Supabase channels", channelError);
   } catch (error) {
     console.warn("Unable to load remote channels, returning cached channels:", error);
   }
@@ -896,31 +923,56 @@ export async function addChannelToCommunity(channelId: string, communityId: stri
   publish("channels:changed");
 }
 
+async function hydrateChannelPostMedia(posts: ChannelPost[]): Promise<ChannelPost[]> {
+  return Promise.all(
+    posts.map(async (p) => {
+      if (p.image && !/^https?:\/\//i.test(p.image) && !p.image.startsWith("blob:") && !p.image.startsWith("data:")) {
+        // p.image is a stable storage path — try to replay from device cache
+        const cached = await getCachedMediaObjectUrl(p.image);
+        if (cached) return { ...p, image: cached };
+      } else if (p.image && (p.image.startsWith("blob:") || p.image.startsWith("data:"))) {
+        // stale blob/data URL from a previous session — try to recover via cache if we know the path
+        // (fallback: keep as-is, will fail to load but better than blank)
+      }
+      return p;
+    }),
+  );
+}
+
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
-  ensureSeed(); // Ensure seed data is available as fallback
+  ensureSeed();
+  const getCachedPosts = async (): Promise<ChannelPost[]> => {
+    const all = await getOfflineList(
+      () => getState().channelPosts,
+      "channelPosts",
+      (items) => hydrateLists({ channelPosts: items }),
+    );
+    const filtered = channelId ? all.filter((p) => p.channelId === channelId) : [...all];
+    const sorted = filtered.sort((a, b) => b.createdAt - a.createdAt);
+    return hydrateChannelPostMedia(sorted);
+  };
 
-  try {
-    const supabase = ensureSupabase();
-    let query = supabase.from("channel_posts").select("*");
-    if (channelId) query = query.eq("channel_id", channelId);
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const cached = await getCachedPosts();
+    console.warn(`[Supabase offline] Returning ${cached.length} cached/seeded posts for channel ${channelId || "all"}`);
+    return cached;
+  }
 
-    const { data: posts, error } = await query.order("created_at", { ascending: false });
-
-    if (!error && posts) {
-      // Fetch all reactions for these posts in ONE batched query so like
-      // counts are real instead of always-empty placeholders.
+  const cached = await getCachedPosts();
+  const doBg = async () => {
+    try {
+      const supabase = ensureSupabase();
+      let query = supabase.from("channel_posts").select("*");
+      if (channelId) query = query.eq("channel_id", channelId);
+      const { data: posts, error } = await query.order("created_at", { ascending: false });
+      if (error || !posts) return;
       const postIds = posts.map((p: any) => p.id);
       let reactionRows: Array<{ post_id: string; user_id: string }> = [];
-      if (postIds.length > 0) {
+      if (postIds.length) {
         try {
-          const { data: reactions, error: reactionsError } = await supabase
-            .from("channel_post_reactions")
-            .select("post_id,user_id")
-            .in("post_id", postIds);
+          const { data: reactions, error: reactionsError } = await supabase.from("channel_post_reactions").select("post_id,user_id").in("post_id", postIds);
           if (!reactionsError && reactions) reactionRows = reactions as any[];
-        } catch (err) {
-          console.warn("listPosts: reaction fetch failed, likes will be empty:", err);
-        }
+        } catch {}
       }
       const likesByPost = new Map<string, string[]>();
       for (const row of reactionRows) {
@@ -928,8 +980,79 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
         if (!list.includes(row.user_id)) list.push(row.user_id);
         likesByPost.set(row.post_id, list);
       }
+      const mappedPosts: ChannelPost[] = posts.map((p: any) => ({
+        id: p.id,
+        channelId: p.channel_id,
+        authorId: p.author_id,
+        kind: p.kind,
+        body: p.body,
+        image: p.image_url, // stable path — durable across reloads
+        likes: likesByPost.get(p.id) ?? [],
+        views: [],
+        realViewCount: Number(p.view_count) || 0,
+        createdAt: new Date(p.created_at).getTime(),
+        boostedLikes: p.boosted_likes,
+        boostedViews: p.boosted_views,
+        pinned: p.pinned,
+      }));
+      // Persist durable path version for offline replay
+      // Merge with existing cached posts that are not in this channel scope
+      const allExisting = await getOfflineList(
+        () => getState().channelPosts,
+        "channelPosts",
+        (items) => hydrateLists({ channelPosts: items }),
+      );
+      const mergedMap = new Map<string, ChannelPost>();
+      for (const p of allExisting) mergedMap.set(p.id, p);
+      for (const p of mappedPosts) mergedMap.set(p.id, p);
+      const merged = Array.from(mergedMap.values());
+      setState((s) => { s.channelPosts = merged; });
+      saveList("channelPosts", merged);
+      // Prime media cache for newly fetched images in background (non-blocking)
+      void (async () => {
+        const imagePaths = mappedPosts.map((p) => p.image ?? null);
+        const imageUrls = await batchGetImageUrls("channel-media", imagePaths).catch(() => [] as (string | undefined)[]);
+        for (let i = 0; i < mappedPosts.length; i++) {
+          const path = imagePaths[i];
+          const url = imageUrls[i];
+          if (path && url) {
+            try { await primeMediaCache(url, path); } catch {}
+          }
+        }
+      })();
+      publish("channels:changed");
+      publish(channelId ? `channel:${channelId}` : "channels:changed");
+    } catch (e) {
+      console.warn("Background channel posts refresh failed:", e);
+    }
+  };
 
-      // Map Supabase posts to ChannelPost type
+  if (cached.length) {
+    void doBg();
+    return cached;
+  }
+
+  // Cold start with no cache — await network
+  try {
+    const supabase = ensureSupabase();
+    let query = supabase.from("channel_posts").select("*");
+    if (channelId) query = query.eq("channel_id", channelId);
+    const { data: posts, error } = await query.order("created_at", { ascending: false });
+    if (!error && posts) {
+      const postIds = posts.map((p: any) => p.id);
+      let reactionRows: Array<{ post_id: string; user_id: string }> = [];
+      if (postIds.length) {
+        try {
+          const { data: reactions, error: reactionsError } = await supabase.from("channel_post_reactions").select("post_id,user_id").in("post_id", postIds);
+          if (!reactionsError && reactions) reactionRows = reactions as any[];
+        } catch {}
+      }
+      const likesByPost = new Map<string, string[]>();
+      for (const row of reactionRows) {
+        const list = likesByPost.get(row.post_id) ?? [];
+        if (!list.includes(row.user_id)) list.push(row.user_id);
+        likesByPost.set(row.post_id, list);
+      }
       const mappedPosts: ChannelPost[] = posts.map((p: any) => ({
         id: p.id,
         channelId: p.channel_id,
@@ -938,47 +1061,34 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
         body: p.body,
         image: p.image_url,
         likes: likesByPost.get(p.id) ?? [],
-        views: [], // per-user view rows aren't stored; aggregate lives in view_count
+        views: [],
         realViewCount: Number(p.view_count) || 0,
         createdAt: new Date(p.created_at).getTime(),
         boostedLikes: p.boosted_likes,
         boostedViews: p.boosted_views,
         pinned: p.pinned,
       }));
-
-      // Batch-resolve image_url storage paths to signed URLs, serving
-      // previously-seen post images straight from the device cache.
       const imagePaths = mappedPosts.map((p) => p.image ?? null);
       const imageUrls = await batchGetImageUrls("channel-media", imagePaths);
       const resolved = await Promise.all(mappedPosts.map(async (p, i) => ({
         ...p,
-        image: imagePaths[i] && imageUrls[i]
-          ? await resolveMedia(() => Promise.resolve(imageUrls[i] as string), imagePaths[i])
-          : (imageUrls[i] ?? p.image),
+        image: imagePaths[i] && imageUrls[i] ? await resolveMedia(() => Promise.resolve(imageUrls[i] as string), imagePaths[i]) : (imageUrls[i] ?? p.image),
       })));
-      saveList("channelPosts", resolved);
-      return resolved;
+      // Persist durable version (path), but return resolved for immediate display
+      const allExisting = getState().channelPosts;
+      const mergedMap = new Map<string, ChannelPost>();
+      for (const p of allExisting) mergedMap.set(p.id, p);
+      for (const p of mappedPosts) mergedMap.set(p.id, p);
+      const merged = Array.from(mergedMap.values());
+      setState((s) => { s.channelPosts = merged; });
+      saveList("channelPosts", merged);
+      return channelId ? resolved.filter((p) => p.channelId === channelId).sort((a, b) => b.createdAt - a.createdAt) : resolved.sort((a, b) => b.createdAt - a.createdAt);
     }
-
-    if (error) {
-      console.error("listPosts: Supabase error - falling back to mock store:", { channelId, error });
-    }
+    if (error) console.error("listPosts: Supabase error - falling back to mock store:", { channelId, error });
   } catch (error) {
     console.error("listPosts: exception - falling back to mock store:", error);
   }
-  
-  const allChannelPosts = await getOfflineList(
-    () => getState().channelPosts,
-    "channelPosts",
-    (items) => hydrateLists({ channelPosts: items }),
-  );
-  const posts = channelId
-    ? allChannelPosts.filter((p) => p.channelId === channelId)
-    : [...allChannelPosts];
-  
-  const sorted = posts.sort((a, b) => b.createdAt - a.createdAt);
-  console.warn(`[Supabase offline] Returning ${sorted.length} cached/seeded posts for channel ${channelId || "all"}`);
-  return sorted;
+  return getCachedPosts();
 }
 
 export async function getPost(id: string): Promise<ChannelPost | undefined> {

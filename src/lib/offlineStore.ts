@@ -15,7 +15,7 @@ import type { Message } from "./mockStore";
 import { db, type QueuedAction } from "./db";
 import { publish, subscribe } from "./eventBus";
 
-const MESSAGE_CACHE_LIMIT = 300;
+const MESSAGE_CACHE_LIMIT = 1000;
 
 // ── L1: In-memory caches (sync reads) ─────────────────────────────────────
 const msgCache = new Map<string, Message[]>();

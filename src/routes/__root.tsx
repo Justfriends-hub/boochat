@@ -19,6 +19,7 @@ import { InstallPromptBanner } from "@/components/InstallPromptBanner";
 import { initOfflineStore, getAppState, setAppState } from "@/lib/offlineStore";
 import { pruneMediaCache } from "@/lib/mediaCache";
 import { initConnectivityWatcher } from "@/stores/syncStore";
+import { scheduleWarmAllCaches } from "@/lib/offlineSync";
 
 function NotFoundComponent() {
   return (
@@ -165,6 +166,13 @@ function RootComponent() {
           getAppState<Status[]>("list:statuses"),
         ]);
         hydrateLists({ users, chats, channels, channelPosts, statuses });
+        // After hydrating, kick off full offline warm (Telegram-style) so
+        // every conversation/message/media is cached for airplane mode.
+        try {
+          const auth = (await import("@/api/authApi")).getCurrentUser();
+          if (auth) scheduleWarmAllCaches(auth.id);
+          else scheduleWarmAllCaches();
+        } catch {}
       })
       .catch(console.warn);
     pruneMediaCache().catch(() => {});

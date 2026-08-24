@@ -50,9 +50,14 @@ export function ChatView({ chatId }: { chatId: string }) {
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [messageViewers, setMessageViewers] = useState<Record<string, string[]>>({});
 
-  const { data: chat } = useQuery({
+  const { data: chat, isLoading: chatLoading, isError: chatError } = useQuery({
     queryKey: ["chat", chatId],
     queryFn: () => getChat(chatId),
+    // Keep offline cache instantly available; don't retry aggressively offline
+    retry: (failureCount, error) => {
+      if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+      return failureCount < 2;
+    },
   });
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
   const { data: messages = [] } = useQuery({
@@ -281,8 +286,27 @@ export function ChatView({ chatId }: { chatId: string }) {
     }
   };
 
-  if (!chat || !me) {
+  if (!me) {
     return <ChatSkeleton />;
+  }
+  if (chatLoading && !chat) {
+    return <ChatSkeleton />;
+  }
+  if (!chat) {
+    const offline = typeof navigator !== "undefined" && !navigator.onLine;
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md rounded-2xl border bg-card p-6 shadow-sm">
+          <p className="font-semibold">{offline ? "Chat unavailable offline" : "Chat not found"}</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {offline
+              ? "This conversation hasn't been cached for offline use yet. Go online once to sync it — then it will be available in airplane mode like Telegram/WhatsApp."
+              : "This chat may have been deleted or you no longer have access."}
+          </p>
+          <Button className="mt-4" variant="outline" onClick={() => router.navigate({ to: "/chats" })}>Back to chats</Button>
+        </div>
+      </div>
+    );
   }
 
   if (isPrivateGroup && !isApprovedMember && !canManageVisibility) {

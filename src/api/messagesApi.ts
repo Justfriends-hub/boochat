@@ -78,28 +78,30 @@ function handleSupabaseError(error: any, context: string): Error {
  * server until explicitly paged in, keeping cold chat opens fast. */
 const MESSAGE_FETCH_LIMIT = 200;
 
-// Fetch messages with instant offline cache fallback
+// Fetch messages with cache-first offline rendering (Telegram/WhatsApp-style)
 export async function listMessages(chatId: string): Promise<Message[]> {
   const cached = getCachedMessages(chatId);
 
-  // Background fetch to refresh local cache
-  if (typeof window !== "undefined" && navigator.onLine) {
+  // Offline: instantly replay from device caches (including voice/image blobs)
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    if (cached.length) return hydrateLocalMedia(chatId);
+    // still try hydrate even if empty (will return [])
+    return hydrateLocalMedia(chatId);
+  }
+
+  // Online: if we have a warm cache, serve it instantly and refresh in background
+  // so the conversation opens with zero network wait (stale-while-revalidate).
+  const doBackgroundRefresh = async () => {
     try {
       const supabase = ensureSupabase();
-      // Latest window only: order DESC + range, then flip to chronological.
       const { data, error } = await supabase
         .from("messages")
         .select("*")
         .eq("chat_id", chatId)
         .order("created_at", { ascending: false })
         .limit(MESSAGE_FETCH_LIMIT);
-
       if (!error && data) {
         const remoteMsgs = data.map(mapMessage).reverse();
-
-        // Batch-resolve storage paths to signed URLs for image and voice playback,
-        // then serve each item from the device media cache when previously viewed —
-        // repeat views cost zero network bandwidth (fully offline-capable).
         const mediaPaths = remoteMsgs.map((m) => m.imagePath ?? null);
         const mediaUrls = await batchGetImageUrls("chat-media", mediaPaths);
         const resolved = await Promise.all(
@@ -110,16 +112,52 @@ export async function listMessages(chatId: string): Promise<Message[]> {
             return m;
           }),
         );
-
+        const beforeCount = getCachedMessages(chatId).length;
         setCachedMessages(chatId, resolved);
-        return getCachedMessages(chatId);
+        // Publish so ChatView live-updates without a manual refresh
+        if (getCachedMessages(chatId).length !== beforeCount) {
+          publish(`chat:${chatId}`);
+        }
       }
     } catch (err) {
-      console.warn("Network fetch failed, serving from offline cache:", err);
+      console.warn("Background message refresh failed:", err);
     }
+  };
+
+  if (cached.length) {
+    // Serve stale cache instantly; refresh in background
+    void doBackgroundRefresh();
+    return hydrateLocalMedia(chatId);
   }
 
-  // Offline (or network failed): replay media from the device cache if viewed before
+  // Cold start with no cache — wait for network
+  try {
+    const supabase = ensureSupabase();
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("chat_id", chatId)
+      .order("created_at", { ascending: false })
+      .limit(MESSAGE_FETCH_LIMIT);
+    if (!error && data) {
+      const remoteMsgs = data.map(mapMessage).reverse();
+      const mediaPaths = remoteMsgs.map((m) => m.imagePath ?? null);
+      const mediaUrls = await batchGetImageUrls("chat-media", mediaPaths);
+      const resolved = await Promise.all(
+        remoteMsgs.map(async (m, i) => {
+          if ((m.kind === "image" || m.kind === "voice") && mediaPaths[i] && mediaUrls[i]) {
+            return { ...m, body: await resolveMedia(() => Promise.resolve(mediaUrls[i] as string), mediaPaths[i]) };
+          }
+          return m;
+        }),
+      );
+      setCachedMessages(chatId, resolved);
+      return getCachedMessages(chatId);
+    }
+  } catch (err) {
+    console.warn("Network fetch failed, serving from offline cache:", err);
+  }
+
   return hydrateLocalMedia(chatId);
 }
 

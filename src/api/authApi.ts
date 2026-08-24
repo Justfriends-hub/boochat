@@ -289,6 +289,12 @@ async function refreshCurrentUser(userId: string) {
     cachedUser = user;
     persistOfflineUser(user);
     publishAuthChange();
+    // Kick off Telegram-style full offline warm in background so every chat/
+    // message/media the user has permission to see is cached for airplane mode.
+    try {
+      const { scheduleWarmAllCaches } = await import("@/lib/offlineSync");
+      scheduleWarmAllCaches(user.id);
+    } catch {}
   } catch (error) {
     console.warn("Unable to refresh current user:", error);
     // Offline / network failure: restore the last-known session if we have one

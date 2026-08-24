@@ -57,13 +57,13 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
-  // Offline cold-start: serve immediately from durable cache like Telegram/WhatsApp
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    const filterByMember = (list: Chat[]) => list.filter((c) => c.memberIds.includes(userId));
-    const memoryChats = getState().chats;
-    if (memoryChats.length) {
-      const filtered = filterByMember(memoryChats);
-      if (filtered.length) return filtered;
+  const filterByMember = (list: Chat[]) => list.filter((c) => c.memberIds.includes(userId));
+
+  const getCached = async (): Promise<Chat[]> => {
+    const mem = getState().chats;
+    if (mem.length) {
+      const f = filterByMember(mem);
+      if (f.length) return f;
     }
     const offline = await getOfflineList(
       () => getState().chats,
@@ -71,7 +71,59 @@ export async function listChats(userId: string): Promise<Chat[]> {
       (items) => hydrateLists({ chats: items }),
     );
     return filterByMember(offline);
+  };
+
+  // Offline: serve instantly from durable cache
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    return getCached();
   }
+
+  // Online cache-first: if we have warm data, return it instantly and refresh in bg
+  const cached = await getCached();
+  const doBgRefresh = async () => {
+    try {
+      const supabase = ensureSupabase();
+      const { data: membershipRows, error: membershipError } = await supabase
+        .from("chat_members")
+        .select("chat_id")
+        .eq("user_id", userId);
+      if (membershipError || !membershipRows) return;
+      const chatIds = membershipRows.map((row) => row.chat_id);
+      if (!chatIds.length) {
+        setState((s) => { s.chats = []; });
+        return;
+      }
+      const { data: chats, error: chatError } = await supabase
+        .from("chats")
+        .select("*")
+        .in("id", chatIds)
+        .order("updated_at", { ascending: false });
+      if (chatError || !chats) return;
+      const memberRows = await fetchChatMembers(chatIds);
+      const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
+      const groups = groupsData.data ?? [];
+      const remoteChats = chats.map((chatRow) => {
+        const members = memberRows.filter((row) => row.chat_id === chatRow.id).map((row) => row.user_id);
+        const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
+        const cachedOne = getState().chats.find((c) => c.id === chatRow.id);
+        const remoteChat = mapChat(chatRow, members, group);
+        if (cachedOne?.visibility) remoteChat.visibility = cachedOne.visibility;
+        return remoteChat;
+      });
+      setState((s) => { s.chats = remoteChats; });
+      saveList("chats", remoteChats);
+      publish("chats:changed");
+    } catch (e) {
+      console.warn("Background chat refresh failed:", e);
+    }
+  };
+
+  if (cached.length) {
+    void doBgRefresh();
+    return cached;
+  }
+
+  // Cold start with no cache — await network
   try {
     const supabase = ensureSupabase();
     const { data: membershipRows, error: membershipError } = await supabase
@@ -86,44 +138,30 @@ export async function listChats(userId: string): Promise<Chat[]> {
           .select("*")
           .in("id", chatIds)
           .order("updated_at", { ascending: false });
-
         if (!chatError && chats) {
           const memberRows = await fetchChatMembers(chatIds);
           const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
           const groups = groupsData.data ?? [];
-
           const remoteChats = chats.map((chatRow) => {
-            const members = memberRows
-              .filter((row) => row.chat_id === chatRow.id)
-              .map((row) => row.user_id);
+            const members = memberRows.filter((row) => row.chat_id === chatRow.id).map((row) => row.user_id);
             const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
-            const cached = getState().chats.find((c) => c.id === chatRow.id);
+            const cachedOne = getState().chats.find((c) => c.id === chatRow.id);
             const remoteChat = mapChat(chatRow, members, group);
-            if (cached?.visibility) remoteChat.visibility = cached.visibility;
+            if (cachedOne?.visibility) remoteChat.visibility = cachedOne.visibility;
             return remoteChat;
           });
-
           setState((s) => { s.chats = remoteChats; });
           saveList("chats", remoteChats);
           return remoteChats;
         }
+      } else {
+        return [];
       }
     }
   } catch (error) {
     console.warn("Unable to load remote chats, returning cached chats:", error);
   }
-  // Fallback: in-memory snapshot first, then the durable IndexedDB mirror
-  const memoryChats = getState().chats;
-  if (memoryChats.length) {
-    const filtered = memoryChats.filter((c) => c.memberIds.includes(userId));
-    if (filtered.length) return filtered;
-  }
-  const offline = await getOfflineList(
-    () => getState().chats,
-    "chats",
-    (items) => hydrateLists({ chats: items }),
-  );
-  return offline.filter((c) => c.memberIds.includes(userId));
+  return cached;
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {

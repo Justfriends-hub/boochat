@@ -49,6 +49,15 @@ class MeshlyDB extends Dexie {
       outbox: "id, chatId, createdAt",
       actions: "id, kind, createdAt",
     });
+    // v3: Raise message retention for offline-first (keep 1000 per chat) and
+    // add explicit stores for list mirrors to avoid JSON blob limits. Existing
+    // appState mirrors remain for backwards compat — v3 is additive only.
+    this.version(3).stores({
+      appState: "key",
+      messages: "id, chatId, createdAt",
+      outbox: "id, chatId, createdAt",
+      actions: "id, kind, createdAt",
+    });
   }
 }
 
