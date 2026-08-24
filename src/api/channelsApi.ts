@@ -277,6 +277,7 @@ export async function createChannel(input: { name: string; description: string; 
       s.channels.unshift(ch);
     }
   });
+  saveList("channels", getState().channels);
   publish("channels:changed");
   return ch;
 }
@@ -1099,6 +1100,7 @@ export async function createPost(input: {
       createdAt: Date.now(),
     };
     setState((s) => { s.channelPosts.unshift(localPost); });
+    saveList("channelPosts", getState().channelPosts);
     await addAction("channel-post", {
       localId,
       channelId: input.channelId,
@@ -1178,6 +1180,7 @@ export async function createPost(input: {
     // optimistic update completes.
     try {
       setState((s) => { s.channelPosts.unshift(mappedPost); });
+      saveList("channelPosts", getState().channelPosts);
     } catch (err) {
       // ignore
     }

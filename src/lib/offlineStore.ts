@@ -13,7 +13,7 @@
  */
 import type { Message } from "./mockStore";
 import { db, type QueuedAction } from "./db";
-import { publish } from "./eventBus";
+import { publish, subscribe } from "./eventBus";
 
 const MESSAGE_CACHE_LIMIT = 300;
 
@@ -83,6 +83,7 @@ export async function initOfflineStore(): Promise<void> {
     } catch {}
 
     publish("offlineStore:ready");
+    setupAutoPersist();
   } catch (err) {
     console.warn("[offlineStore] Failed to initialize from IndexedDB:", err);
   }
@@ -259,6 +260,49 @@ export type SavedListKey = "users" | "chats" | "channels" | "channelPosts" | "st
 export function saveList<T>(key: SavedListKey, items: T[]): void {
   if (!items || items.length === 0) return;
   void setAppState(`list:${key}`, items);
+}
+
+/** Force-save a list even when empty (used for deletions). */
+export function saveListForce<T>(key: SavedListKey, items: T[]): void {
+  if (!items) return;
+  void setAppState(`list:${key}`, items);
+}
+
+/**
+ * Persist all current mockStore lists to IndexedDB in one go.
+ * Call this after any local mutation to guarantee offline-first availability
+ * (Telegram/WhatsApp-style: every chat/group/channel you ever opened is
+ * available offline on cold start without a network round-trip).
+ */
+export async function persistMockListsNow(): Promise<void> {
+  try {
+    const { getState } = await import("./mockStore");
+    const s = getState();
+    const ops: Promise<void>[] = [];
+    if (s.users.length) ops.push(setAppState("list:users", s.users));
+    if (s.chats.length) ops.push(setAppState("list:chats", s.chats));
+    if (s.channels.length) ops.push(setAppState("list:channels", s.channels));
+    if (s.channelPosts.length) ops.push(setAppState("list:channelPosts", s.channelPosts));
+    if (s.statuses.length) ops.push(setAppState("list:statuses", s.statuses));
+    if (ops.length) await Promise.all(ops);
+  } catch {}
+}
+
+/** Subscribe to mockStore change events and auto-persist lists to IDB. */
+function setupAutoPersist() {
+  if (typeof window === "undefined") return;
+  try {
+    // Debounced flush — batches rapid chat/message bursts into one IDB write
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleFlush = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = setTimeout(() => { void persistMockListsNow(); }, 400);
+    };
+    subscribe("chats:changed", scheduleFlush);
+    subscribe("channels:changed", scheduleFlush);
+    subscribe("users:changed", scheduleFlush);
+    subscribe("offlineStore:ready", scheduleFlush);
+  } catch {}
 }
 
 /**

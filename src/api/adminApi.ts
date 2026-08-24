@@ -638,6 +638,10 @@ export async function boostPost(input: {
     }
     s.boosts.push(boost);
   });
+  try {
+    const { saveList: saveListFn } = await import("@/lib/offlineStore");
+    saveListFn("channelPosts", getState().channelPosts);
+  } catch {}
   audit({ adminId: input.adminId, action: "boost_post", targetType: "post", targetId: input.postId, meta: { kind: input.kind, amount: input.amount } });
   publish("channels:changed");
   publish("boosts:changed");

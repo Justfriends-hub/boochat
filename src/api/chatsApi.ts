@@ -57,15 +57,20 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
-  // Offline cold-start: don't waste time hitting Supabase when we know we're offline
+  // Offline cold-start: serve immediately from durable cache like Telegram/WhatsApp
   if (typeof window !== "undefined" && !navigator.onLine) {
+    const filterByMember = (list: Chat[]) => list.filter((c) => c.memberIds.includes(userId));
     const memoryChats = getState().chats;
-    if (memoryChats.length) return memoryChats;
-    return getOfflineList(
+    if (memoryChats.length) {
+      const filtered = filterByMember(memoryChats);
+      if (filtered.length) return filtered;
+    }
+    const offline = await getOfflineList(
       () => getState().chats,
       "chats",
       (items) => hydrateLists({ chats: items }),
     );
+    return filterByMember(offline);
   }
   try {
     const supabase = ensureSupabase();
@@ -109,12 +114,16 @@ export async function listChats(userId: string): Promise<Chat[]> {
   }
   // Fallback: in-memory snapshot first, then the durable IndexedDB mirror
   const memoryChats = getState().chats;
-  if (memoryChats.length) return memoryChats;
-  return getOfflineList(
+  if (memoryChats.length) {
+    const filtered = memoryChats.filter((c) => c.memberIds.includes(userId));
+    if (filtered.length) return filtered;
+  }
+  const offline = await getOfflineList(
     () => getState().chats,
     "chats",
     (items) => hydrateLists({ chats: items }),
   );
+  return offline.filter((c) => c.memberIds.includes(userId));
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
@@ -215,6 +224,7 @@ export async function getOrCreateDM(userA: string, userB: string): Promise<Chat>
   setState((s) => {
     if (!s.chats.find((c) => c.id === mapped.id)) s.chats.push(mapped);
   });
+  saveList("chats", getState().chats);
   publish("chats:changed");
   return mapped;
 }
@@ -263,6 +273,16 @@ export async function createGroup(input: {
     }
   }
 
+  // Persist immediately for offline-first: chat must survive cold offline reload
+  setState((s) => {
+    const mapped = mapChat(newChat, members, { ...groupRow, visibility });
+    if (!s.chats.find((c) => c.id === mapped.id)) s.chats.push(mapped);
+    else {
+      const idx = s.chats.findIndex((c) => c.id === mapped.id);
+      if (idx >= 0) s.chats[idx] = mapped;
+    }
+  });
+  saveList("chats", getState().chats);
   publish("chats:changed");
   return mapChat(newChat, members, { ...groupRow, visibility });
 }
@@ -301,6 +321,7 @@ export async function updateChat(id: string, patch: Partial<Chat>) {
         const chat = s.chats.find((c) => c.id === id);
         if (chat) chat.visibility = patch.visibility;
       });
+      saveList("chats", getState().chats);
     }
   }
 
@@ -313,6 +334,7 @@ export async function updateChat(id: string, patch: Partial<Chat>) {
     });
   }
 
+  saveList("chats", getState().chats);
   publish("chats:changed");
   publish(`chat:${id}`);
 }
@@ -339,6 +361,10 @@ export async function leaveGroup(chatId: string, userId: string) {
       .eq("user_id", userId);
   }
 
+  setState((s) => {
+    s.chats = s.chats.filter((c) => c.id !== chatId || c.type !== "group");
+  });
+  saveList("chats", getState().chats);
   publish("chats:changed");
 }
 
@@ -425,6 +451,7 @@ export async function requestJoinGroup(chatId: string, userId: string) {
       { userId, requestedAt: Date.now(), status: "pending" },
     ];
   });
+  saveList("chats", getState().chats);
 
   publish("chats:changed");
   publish(`chat:${chatId}`);
@@ -455,6 +482,7 @@ export async function approveJoinGroupRequest(chatId: string, userId: string) {
     target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
     if (!target.memberIds.includes(userId)) target.memberIds.push(userId);
   });
+  saveList("chats", getState().chats);
 
   publish("chats:changed");
   publish(`chat:${chatId}`);
@@ -478,6 +506,7 @@ export async function rejectJoinGroupRequest(chatId: string, userId: string) {
     if (!target) return;
     target.joinRequests = (target.joinRequests ?? []).filter((req) => req.userId !== userId);
   });
+  saveList("chats", getState().chats);
 
   publish("chats:changed");
   publish(`chat:${chatId}`);
