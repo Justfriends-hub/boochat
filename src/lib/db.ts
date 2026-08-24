@@ -18,10 +18,22 @@ export interface AppStateRow {
   value: any;
 }
 
+/** A user action created offline and replayed when connectivity returns. */
+export interface QueuedAction {
+  id: string;
+  kind: "channel-post" | "comment";
+  /** Kind-specific fields (channelId, body, image File, localId…). Files and
+   * Blobs are persisted fine by IndexedDB's structured clone. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: Record<string, any>;
+  createdAt: number;
+}
+
 class MeshlyDB extends Dexie {
   messages!: Table<Message, string>;
   outbox!: Table<Message, string>;
   appState!: Table<AppStateRow, string>;
+  actions!: Table<QueuedAction, string>;
 
   constructor() {
     super("MeshlyDB");
@@ -30,6 +42,12 @@ class MeshlyDB extends Dexie {
       messages: "id, chatId, createdAt",
       outbox: "id, chatId, createdAt",
       appState: "key",
+    });
+    this.version(2).stores({
+      appState: "key",
+      messages: "id, chatId, createdAt",
+      outbox: "id, chatId, createdAt",
+      actions: "id, kind, createdAt",
     });
   }
 }

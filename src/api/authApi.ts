@@ -3,6 +3,7 @@ import { publish, subscribe } from "@/lib/eventBus";
 import { resolveMedia } from "@/lib/mediaCache";
 import { normalizeRole, type User } from "@/lib/mockStore";
 import { startPresence, stopPresence } from "@/lib/presence";
+import { userAvatarFallback } from "@/lib/avatar";
 
 let cachedUser: User | null = null;
 let authReady = false;
@@ -55,12 +56,12 @@ function toUser(profile: any, roles: Array<{ role: string }> | null = null): Use
   const avatar =
     rawAvatar && !/^https?:\/\//i.test(rawAvatar)
       ? undefined // resolved asynchronously below by resolveUserAvatar
-      : rawAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
+      : rawAvatar || userAvatarFallback(profile.id ?? profile.email);
   return {
     id: profile.id,
     email: profile.email,
     displayName: profile.display_name || profile.email.split("@")[0],
-    avatar: avatar ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`,
+    avatar: avatar ?? userAvatarFallback(profile.id ?? profile.email),
     role,
     online: profile.online ?? false,
     banned: profile.banned ?? false,
@@ -74,7 +75,7 @@ function toUser(profile: any, roles: Array<{ role: string }> | null = null): Use
 /** Resolves a profile row's avatar_url to a usable URL (public CDN or DiceBear fallback). */
 async function resolveAvatarUrl(profile: any): Promise<string> {
   const raw: string = profile.avatar_url || "";
-  if (!raw) return `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
+  if (!raw) return userAvatarFallback(profile.id ?? profile.email);
   try {
     // Serve from the device media cache when viewed before; otherwise resolve
     // via a lazy imageUpload import (keeps the compression chunk off the auth path).
@@ -83,7 +84,7 @@ async function resolveAvatarUrl(profile: any): Promise<string> {
       return getImageUrl("avatars", raw);
     }, raw);
   } catch {
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
+    return userAvatarFallback(profile.id ?? profile.email);
   }
 }
 
@@ -374,7 +375,7 @@ export async function signUp(input: {
     id: "",
     email: input.email,
     displayName: input.displayName,
-    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(input.email)}`,
+    avatar: userAvatarFallback(input.email),
     role: "user",
     online: false,
   };

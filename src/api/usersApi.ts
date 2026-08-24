@@ -4,6 +4,7 @@ import { getState, setState, hydrateLists, normalizeRole, type User } from "@/li
 import { getImageUrl, batchGetImageUrls } from "@/lib/imageUpload";
 import { resolveMedia } from "@/lib/mediaCache";
 import { getOfflineList, saveList } from "@/lib/offlineStore";
+import { userAvatarFallback } from "@/lib/avatar";
 
 /**
  * Batch-resolves storage-path avatars to signed URLs using the batch API.
@@ -49,13 +50,13 @@ function mapProfileSync(profile: any): User {
     ? rawAvatar  // already a full URL — use it directly
     : rawAvatar
       ? undefined // storage path — will be resolved asynchronously
-      : `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
+      : userAvatarFallback(profile.id ?? profile.email);
 
   return {
     id: profile.id,
     email: profile.email,
     displayName: profile.display_name || profile.email?.split("@")[0] || "User",
-    avatar: avatar ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`,
+    avatar: avatar ?? userAvatarFallback(profile.id ?? profile.email),
     role: normalizeRole(profile.role ?? "user"),
     online: profile.online ?? false,
     banned: profile.banned ?? false,
@@ -74,7 +75,7 @@ async function mapProfileAsync(profile: any): Promise<User> {
         profile.avatar_url,
       );
     } catch {
-      const fallback = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profile.email)}`;
+      const fallback = userAvatarFallback(profile.id ?? profile.email);
       base.avatar = fallback;
     }
   }

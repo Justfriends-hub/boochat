@@ -3,8 +3,11 @@ import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 import { resolveMedia, primeMediaCache } from "@/lib/mediaCache";
-import { getOfflineList, saveList } from "@/lib/offlineStore";
+import { getOfflineList, saveList, addAction, getActions, removeAction } from "@/lib/offlineStore";
 import { hydrateLists } from "@/lib/mockStore";
+import { channelAvatarFallback, userAvatarFallback } from "@/lib/avatar";
+import { registerActionDrain, initConnectivityWatcher } from "@/stores/syncStore";
+import type { QueuedAction } from "@/lib/db";
 
 function isFullUrl(value?: string): boolean {
   return !!value && /^(https?:\/\/|data:|blob:)/i.test(value);
@@ -23,7 +26,7 @@ function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
     id: row.id,
     name: row.name,
     description: row.description,
-    avatar: row.avatar_url ?? `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.name)}`,
+    avatar: row.avatar_url ?? channelAvatarFallback(row.name),
     wallpaper: row.wallpaper_url ?? undefined,
     ownerId: row.owner_id,
     adminIds,
@@ -217,7 +220,7 @@ export async function createChannel(input: { name: string; description: string; 
   const supabase = ensureSupabase();
   const visibility = input.visibility ?? "public";
   
-  const avatar = `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(input.name)}`;
+  const avatar = channelAvatarFallback(input.name);
   
   const { data: channelRow, error: createError } = await supabase
     .from("channels")
@@ -487,7 +490,7 @@ export async function getChannelAdmins(channelId: string): Promise<ChannelAdmin[
         userId: row.user_id,
         email: row.profiles?.email ?? "",
         displayName: row.profiles?.display_name ?? row.user_id,
-        avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles.email ?? row.user_id)}`) : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles?.email ?? row.user_id)}`,
+        avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : userAvatarFallback(row.user_id)) : userAvatarFallback(row.user_id),
         isAdmin: row.is_admin,
         joinedAt: row.joined_at ? new Date(row.joined_at).getTime() : undefined,
       }));
@@ -542,7 +545,7 @@ export async function getChannelSubscribers(channelId: string, options: { search
           userId: row.user_id,
           email: row.profiles?.email ?? "",
           displayName: row.profiles?.display_name ?? row.user_id,
-          avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles.email ?? row.user_id)}`) : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles?.email ?? row.user_id)}`,
+          avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : userAvatarFallback(row.user_id)) : userAvatarFallback(row.user_id),
           isAdmin: row.is_admin,
           joinedAt: row.joined_at ? new Date(row.joined_at).getTime() : undefined,
         })),
@@ -671,7 +674,7 @@ export async function getRemovedMembers(channelId: string): Promise<ChannelRemov
         removedAt: new Date(row.removed_at).getTime(),
         email: row.profiles?.email,
         displayName: row.profiles?.display_name,
-        avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles.email ?? row.user_id)}`) : `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(row.profiles?.email ?? row.user_id)}`,
+        avatar: row.profiles?.avatar_url ? (isFullUrl(row.profiles.avatar_url) ? row.profiles.avatar_url : userAvatarFallback(row.user_id)) : userAvatarFallback(row.user_id),
       }));
     }
   } catch (err) {
@@ -1058,6 +1061,40 @@ export async function createPost(input: {
   /** Pass a File to compress+upload via the image pipeline, or a pre-resolved URL/path. */
   image?: string | File;
 }) {
+  // Offline: render optimistically and queue a replayable action so nothing
+  // is lost until connectivity returns.
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const localId = uid();
+    const imagePreview = input.image instanceof File
+      ? URL.createObjectURL(input.image)
+      : (typeof input.image === "string" && input.image ? input.image : undefined);
+    const localPost: ChannelPost = {
+      id: localId,
+      channelId: input.channelId,
+      authorId: input.authorId,
+      kind: input.kind,
+      body: input.body,
+      image: imagePreview,
+      likes: [],
+      views: [],
+      realViewCount: 0,
+      createdAt: Date.now(),
+    };
+    setState((s) => { s.channelPosts.unshift(localPost); });
+    await addAction("channel-post", {
+      localId,
+      channelId: input.channelId,
+      authorId: input.authorId,
+      kind: input.kind,
+      body: input.body,
+      imageFile: input.image instanceof File ? input.image : undefined,
+      image: typeof input.image === "string" ? input.image : undefined,
+    });
+    publish("channels:changed");
+    publish(`channel:${input.channelId}`);
+    return localPost;
+  }
+
   try {
     const supabase = ensureSupabase();
     
@@ -1309,6 +1346,22 @@ export async function listComments(postId: string): Promise<Comment[]> {
 }
 
 export async function addComment(input: { postId: string; authorId: string; body: string }) {
+  // Offline: optimistic local comment + replayable action.
+  if (typeof window !== "undefined" && !navigator.onLine) {
+    const localId = uid();
+    const localComment: Comment = {
+      id: localId,
+      postId: input.postId,
+      authorId: input.authorId,
+      body: input.body,
+      createdAt: Date.now(),
+    };
+    setState((s) => { s.comments.push(localComment); });
+    publish(`comments:${input.postId}`);
+    await addAction("comment", { localId, postId: input.postId, authorId: input.authorId, body: input.body });
+    return localComment;
+  }
+
   try {
     const supabase = ensureSupabase();
     const { data: row, error } = await supabase
@@ -1423,4 +1476,111 @@ export async function editComment(commentId: string, body: string) {
     console.error("Failed to edit comment:", error);
     throw error;
   }
+}
+
+// ── Offline action drain ────────────────────────────────────────────────
+// Replays channel posts / comments queued while offline. Runs on every
+// reconnect (via syncStore) and once shortly after boot for previous-session
+// leftovers. Media Files are persisted via IndexedDB structured clone.
+
+async function drainQueuedActions(): Promise<void> {
+  if (typeof window === "undefined" || !navigator.onLine) return;
+  let actions: QueuedAction[];
+  try {
+    actions = await getActions();
+  } catch {
+    return;
+  }
+  if (!actions.length) return;
+
+  for (const act of actions) {
+    try {
+      const supabase = ensureSupabase();
+      if (act.kind === "channel-post") {
+        const p = act.payload as {
+          localId: string;
+          channelId: string;
+          authorId: string;
+          kind: "text" | "image";
+          body: string;
+          imageFile?: File;
+          image?: string;
+        };
+        let imageUrl: string | undefined;
+        const maybeFile: unknown = p.imageFile;
+        if (maybeFile instanceof File) {
+          try {
+            imageUrl = await uploadImage(maybeFile, "channel-media", `${p.channelId}/posts`);
+          } catch (e) {
+            // Upload failed — keep queued for next retry
+            console.warn("[channelsApi] drain: image upload failed, will retry:", e);
+            continue;
+          }
+        } else if (typeof p.image === "string" && p.image) {
+          imageUrl = p.image;
+        }
+
+        const { data: post, error } = await supabase
+          .from("channel_posts")
+          .insert([{ channel_id: p.channelId, author_id: p.authorId, kind: p.kind, body: p.body, image_url: imageUrl }])
+          .select()
+          .single();
+        if (error || !post) throw error ?? new Error("insert returned no data");
+
+        const displayImage = imageUrl
+          ? await resolveMedia(() => getImageUrl("channel-media", imageUrl), imageUrl).catch(() => imageUrl)
+          : undefined;
+        const mapped: ChannelPost = {
+          id: post.id,
+          channelId: post.channel_id,
+          authorId: post.author_id,
+          kind: post.kind,
+          body: post.body,
+          image: displayImage,
+          likes: [],
+          views: [],
+          realViewCount: Number(post.view_count) || 0,
+          createdAt: new Date(post.created_at).getTime(),
+          boostedLikes: post.boosted_likes,
+          boostedViews: post.boosted_views,
+        };
+        setState((s) => {
+          s.channelPosts = s.channelPosts.filter((x) => x.id !== p.localId);
+          if (!s.channelPosts.some((x) => x.id === mapped.id)) s.channelPosts.unshift(mapped);
+        });
+        publish("channels:changed");
+        publish(`channel:${p.channelId}`);
+      } else if (act.kind === "comment") {
+        const c = act.payload as { localId: string; postId: string; authorId: string; body: string };
+        const { data: row, error } = await supabase
+          .from("comments")
+          .insert([{ message_id: c.postId, user_id: c.authorId, content: c.body, status: "approved" }])
+          .select()
+          .single();
+        if (error || !row) throw error ?? new Error("comment insert failed");
+        const comment = mapCommentRow(row);
+        setState((s) => {
+          s.comments = s.comments.filter((x) => x.id !== c.localId);
+          if (!s.comments.some((x) => x.id === comment.id)) s.comments.push(comment);
+        });
+        publish(`comments:${c.postId}`);
+      } else {
+        // Unknown kind — drop to avoid infinite retry
+        console.warn("[channelsApi] drain: unknown action kind", act.kind);
+      }
+      await removeAction(act.id);
+    } catch (err) {
+      console.warn("[channelsApi] drain: failed to replay action", act.id, err);
+      // Network / RLS error — stop processing further actions this cycle;
+      // remaining items will retry on next reconnect.
+      if (typeof navigator !== "undefined" && !navigator.onLine) break;
+      // For server errors, continue to next action after a brief pause
+    }
+  }
+}
+
+registerActionDrain(drainQueuedActions);
+initConnectivityWatcher();
+if (typeof window !== "undefined") {
+  setTimeout(() => { void drainQueuedActions(); }, 2000);
 }

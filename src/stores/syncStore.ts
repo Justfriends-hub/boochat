@@ -81,6 +81,15 @@ export function registerOutboxDrain(fn: DrainFn) {
 }
 
 /**
+ * Drains for the action outbox (offline channel posts/comments — see
+ * offlineStore.addAction). Any module may register; all run on reconnect.
+ */
+const actionDrainers: DrainFn[] = [];
+export function registerActionDrain(fn: DrainFn) {
+  actionDrainers.push(fn);
+}
+
+/**
  * A real network request just failed unexpectedly (timeout/abort/DNS).
  * The browser still claims we're online — it's lying. Flip to red now;
  * the watcher below will restore green once a probe succeeds.
@@ -127,6 +136,11 @@ function runReconnectFlow() {
     // Nothing to send — flash ✅ Back online briefly, then hide
     s.markSynced();
   }
+
+  // Replay offline-created posts/comments/etc. regardless of message queue.
+  actionDrainers.forEach((fn) => {
+    try { void fn(); } catch {}
+  });
 }
 
 let retryTimer: ReturnType<typeof setTimeout> | null = null;

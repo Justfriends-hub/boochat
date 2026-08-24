@@ -74,6 +74,10 @@ function handleSupabaseError(error: any, context: string): Error {
   return new Error(error?.message || context);
 }
 
+/** Latest window of messages fetched per chat — older history stays on the
+ * server until explicitly paged in, keeping cold chat opens fast. */
+const MESSAGE_FETCH_LIMIT = 200;
+
 // Fetch messages with instant offline cache fallback
 export async function listMessages(chatId: string): Promise<Message[]> {
   const cached = getCachedMessages(chatId);
@@ -82,14 +86,16 @@ export async function listMessages(chatId: string): Promise<Message[]> {
   if (typeof window !== "undefined" && navigator.onLine) {
     try {
       const supabase = ensureSupabase();
+      // Latest window only: order DESC + range, then flip to chronological.
       const { data, error } = await supabase
         .from("messages")
         .select("*")
         .eq("chat_id", chatId)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false })
+        .limit(MESSAGE_FETCH_LIMIT);
 
       if (!error && data) {
-        const remoteMsgs = data.map(mapMessage);
+        const remoteMsgs = data.map(mapMessage).reverse();
 
         // Batch-resolve storage paths to signed URLs for image and voice playback,
         // then serve each item from the device media cache when previously viewed —

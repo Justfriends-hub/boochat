@@ -12,7 +12,7 @@
  * pre-populate L1 from L2 so the cache is warm before any API calls fire.
  */
 import type { Message } from "./mockStore";
-import { db } from "./db";
+import { db, type QueuedAction } from "./db";
 import { publish } from "./eventBus";
 
 const MESSAGE_CACHE_LIMIT = 300;
@@ -145,6 +145,59 @@ export function removeFromOutbox(msgId: string): void {
 /** Count of messages currently queued in the outbox. */
 export function getPendingCount(): number {
   return outboxCache.length;
+}
+
+// ── Action outbox (non-message entities created offline) ──────────────────
+// Channel posts, comments and similar writes queue here as replayable
+// actions; a registered drainer (channelsApi) replays them on reconnect.
+
+const actionListeners = new Set<() => void>();
+
+/** Subscribe to action-queue changes (for badges/UI). Returns unsubscriber. */
+export function subscribeActionQueue(cb: () => void): () => void {
+  actionListeners.add(cb);
+  return () => actionListeners.delete(cb);
+}
+
+function notifyActions() {
+  actionListeners.forEach((cb) => {
+    try { cb(); } catch {}
+  });
+}
+
+/** Queue an offline-created action for later replay. */
+export async function addAction(kind: QueuedAction["kind"], payload: Record<string, unknown>): Promise<void> {
+  const action: QueuedAction = {
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    payload,
+    createdAt: Date.now(),
+  };
+  try {
+    await db.actions.put(action);
+    notifyActions();
+  } catch (err) {
+    console.warn("[offlineStore] addAction failed:", err);
+  }
+}
+
+/** Snapshot of queued actions, oldest first. */
+export async function getActions(): Promise<QueuedAction[]> {
+  try {
+    return await db.actions.orderBy("createdAt").toArray();
+  } catch {
+    return [];
+  }
+}
+
+/** Remove a successfully replayed action. */
+export async function removeAction(actionId: string): Promise<void> {
+  try {
+    await db.actions.delete(actionId);
+    notifyActions();
+  } catch (err) {
+    console.warn("[offlineStore] removeAction failed:", err);
+  }
 }
 
 // ── App state (last route, scroll, etc.) ──────────────────────────────────
