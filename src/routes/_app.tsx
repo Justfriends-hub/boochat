@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppNav } from "@/components/AppNav";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { useAuth, useAuthReady } from "@/hooks/useAuth";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { listChats } from "@/api/chatsApi";
 import { listChannels } from "@/api/channelsApi";
 import { listUsers } from "@/api/usersApi";
+import { ensureSupabase } from "@/lib/supabaseClient";
 
 export const Route = createFileRoute("/_app")({
   component: AppLayout,
@@ -24,6 +25,7 @@ function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location?.pathname });
   const isLoading = useRouterState({ select: (s) => s.status === "pending" || s.isLoading });
   const appHeight = useAppHeight();
+  const [moneyMateJoined, setMoneyMateJoined] = useState(false);
 
   const isDetailRoute = typeof pathname === "string" && (
     (pathname.startsWith("/chats/") && pathname !== "/chats") ||
@@ -46,6 +48,87 @@ function AppLayout() {
     if (!ready || typeof window === "undefined") return;
     if (!me) nav({ to: "/auth/login" });
   }, [me, ready, nav]);
+
+  // Auto-join the "moneymate" channel when a user arrives via a MoneyMate
+  // tracking link (source=flashgain). The auth pages set a localStorage flag
+  // before triggering OAuth because the URL param is lost during the redirect.
+  // This lives in the persistent _app layout so it survives the OAuth round-trip.
+  useEffect(() => {
+    if (!ready || !me || typeof window === "undefined") return;
+    const isMoneyMateSource = localStorage.getItem("boochat.moneymateSource") === "1";
+    if (!isMoneyMateSource) return;
+    if (moneyMateJoined) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        localStorage.removeItem("boochat.moneymateSource");
+        const client = ensureSupabase();
+        if (!client) return;
+
+        const { data: channel, error: chError } = await client
+          .from("channels")
+          .select("id, name")
+          .eq("name", "moneymate")
+          .single();
+
+        if (chError && chError.code !== "PGRST116") {
+          console.warn("MoneyMate auto-join: error fetching channel:", chError);
+          return;
+        }
+
+        if (channel?.id) {
+          const { data: members, error: memError } = await client
+            .from("channel_members")
+            .select("user_id")
+            .eq("channel_id", channel.id)
+            .eq("user_id", me.id);
+
+          if (memError) {
+            console.warn("MoneyMate auto-join: error checking membership:", memError);
+            return;
+          }
+
+          if (!members?.length) {
+            await client.from("channel_members").insert({
+              channel_id: channel.id,
+              user_id: me.id,
+            });
+          }
+        } else {
+          const { data: newChannel, error: createError } = await client
+            .from("channels")
+            .insert({
+              name: "moneymate",
+              visibility: "public",
+              owner_id: me.id,
+            })
+            .select()
+            .single();
+
+          if (createError) {
+            console.warn("MoneyMate auto-join: error creating channel:", createError);
+            return;
+          }
+
+          await client.from("channel_members").insert({
+            channel_id: newChannel.id,
+            user_id: me.id,
+            is_admin: true,
+          });
+        }
+
+        if (!cancelled) {
+          setMoneyMateJoined(true);
+          void qc.invalidateQueries({ queryKey: ["channels"] });
+        }
+      } catch (err) {
+        console.warn("MoneyMate auto-join failed:", err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [me, ready, moneyMateJoined, qc]);
 
   useEffect(() => {
     if (!ready || !me || typeof window === "undefined") return;
