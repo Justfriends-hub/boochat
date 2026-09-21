@@ -37,6 +37,9 @@ export function Composer({
   const chunksRef = useRef<BlobPart[]>([]);
   const timerRef = useRef<number | null>(null);
   const shouldSendAfterStop = useRef(false);
+  // Guard against double-submit: Enter key repeat, double-click on send,
+  // or React StrictMode double-invoking the handler in the same tick.
+  const lastSentRef = useRef<{ key: string; at: number } | null>(null);
 
   const user = useAuth();
 
@@ -89,6 +92,17 @@ export function Composer({
   };
 
   const send = () => {
+    if (disabled) return;
+    const now = Date.now();
+    const dedupeKey = pendingAudio
+      ? `voice:${pendingAudio.file.size}:${pendingAudio.duration}`
+      : pendingImage
+        ? `image:${pendingImage.file.size}:${pendingImage.file.name}:${value.trim()}`
+        : `text:${value.trim()}`;
+    const last = lastSentRef.current;
+    if (last && last.key === dedupeKey && now - last.at < 1000) return;
+    lastSentRef.current = { key: dedupeKey, at: now };
+
     if (pendingAudio) {
       onSend({ kind: "voice", body: pendingAudio.preview, file: pendingAudio.file, duration: pendingAudio.duration });
       cleanupPendingAudio();
@@ -152,18 +166,24 @@ export function Composer({
 
         setRecording(false);
         setRecordSec(0);
-        setPendingAudio({ file, preview, duration });
 
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
         }
 
+        // Auto-send path (stop + send button): send directly WITHOUT leaving
+        // a pendingAudio behind, otherwise the next send press re-sends the
+        // same voice message a second time.
         if (shouldSendAfterStop.current && duration > 0) {
+          shouldSendAfterStop.current = false;
+          lastSentRef.current = { key: `voice:${file.size}:${duration}`, at: Date.now() };
           onSend({ kind: "voice", body: preview, file, duration });
-          cleanupPendingAudio();
           onChange("");
+          return;
         }
+
+        setPendingAudio({ file, preview, duration });
       };
 
       recorder.start();

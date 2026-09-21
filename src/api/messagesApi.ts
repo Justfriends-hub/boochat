@@ -5,6 +5,7 @@ import {
   getCachedMessages,
   setCachedMessages,
   saveLocalMessage,
+  removeLocalMessage,
   addToOutbox,
   getOutbox,
   removeFromOutbox,
@@ -264,8 +265,18 @@ export async function sendMessage(input: {
  * the local pending copy for the confirmed message. On ANY failure the
  * message stays queued in the outbox — media messages can no longer be lost
  * to a flaky connection mid-upload.
+ *
+ * The pending optimistic copy (temp id `pending-…`) is REMOVED when the
+ * server confirms, otherwise every message renders twice (pending clock +
+ * delivered check) and survives in cache via setCachedMessages' pending
+ * preservation. An in-flight guard also stops double-tap / StrictMode /
+ * reconnect races from inserting the same temp message twice.
  */
+const inFlightDeliver = new Set<string>();
+
 async function deliverPending(pendingMsg: Message): Promise<Message> {
+  if (inFlightDeliver.has(pendingMsg.id)) return pendingMsg;
+  inFlightDeliver.add(pendingMsg.id);
   try {
     const supabase = ensureSupabase();
 
@@ -308,7 +319,9 @@ async function deliverPending(pendingMsg: Message): Promise<Message> {
     // Restore a displayable URL so the UI doesn't flicker
     if (imageDisplayUrl) sentMsg.body = imageDisplayUrl;
 
-    // Replace pending message with confirmed sent message
+    // Swap pending temp copy for the confirmed server row — this removal is
+    // what prevents every DM/chat message from appearing twice.
+    removeLocalMessage(pendingMsg.chatId, pendingMsg.id);
     saveLocalMessage(sentMsg);
     removeFromOutbox(pendingMsg.id);
 
@@ -319,6 +332,8 @@ async function deliverPending(pendingMsg: Message): Promise<Message> {
     console.warn("Message delivery failed, queued in outbox:", err);
     addToOutbox(pendingMsg);
     return pendingMsg;
+  } finally {
+    inFlightDeliver.delete(pendingMsg.id);
   }
 }
 
