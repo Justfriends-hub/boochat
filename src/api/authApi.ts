@@ -18,9 +18,18 @@ let authStateSubscription: { data: { subscription: { unsubscribe: () => void } }
 // Reads are local-only; any real server call still requires the live token.
 const OFFLINE_USER_KEY = "boochat.offlineUser.v1";
 
+function isRealUserId(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
 function persistOfflineUser(user: User | null) {
   if (typeof window === "undefined") return;
   try {
+    if (user && !isRealUserId(user.id)) {
+      localStorage.removeItem(OFFLINE_USER_KEY);
+      return;
+    }
     if (user) localStorage.setItem(OFFLINE_USER_KEY, JSON.stringify(user));
     else localStorage.removeItem(OFFLINE_USER_KEY);
   } catch {}
@@ -30,8 +39,16 @@ function loadOfflineUser(): User | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(OFFLINE_USER_KEY);
-    return raw ? (JSON.parse(raw) as User) : null;
+    if (!raw) return null;
+
+    const user = JSON.parse(raw) as Partial<User> | null;
+    if (!user || !isRealUserId(user.id as string | undefined)) {
+      localStorage.removeItem(OFFLINE_USER_KEY);
+      return null;
+    }
+    return user as User;
   } catch {
+    try { localStorage.removeItem(OFFLINE_USER_KEY); } catch {}
     return null;
   }
 }
@@ -233,6 +250,14 @@ export async function initializeAuth() {
 }
 
 async function refreshCurrentUser(userId: string) {
+  if (!isRealUserId(userId)) {
+    cachedUser = null;
+    persistOfflineUser(null);
+    authReady = true;
+    publishAuthChange();
+    return;
+  }
+
   try {
     const client = ensureSupabase();
     const { data: profile, error: profileError } = await client

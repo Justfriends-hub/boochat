@@ -56,6 +56,11 @@ function isVisibilitySchemaError(error: any) {
   return message.includes("column") && message.includes("does not exist");
 }
 
+function isValidSupabaseId(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
 async function fetchChatMembers(chatIds: string[]) {
   try {
     const supabase = ensureSupabase();
@@ -76,6 +81,10 @@ async function fetchChatMembers(chatIds: string[]) {
 }
 
 export async function listChats(userId: string): Promise<Chat[]> {
+  if (!isValidSupabaseId(userId)) {
+    return [];
+  }
+
   const filterByMember = (list: Chat[]) => list.filter((c) => c.memberIds.includes(userId));
 
   /**
@@ -192,6 +201,10 @@ export async function listChats(userId: string): Promise<Chat[]> {
 }
 
 export async function getChat(id: string): Promise<Chat | undefined> {
+  if (!isValidSupabaseId(id)) {
+    return undefined;
+  }
+
   const findInMemory = () => getState().chats.find((c) => c.id === id);
   const findInMirror = async (): Promise<Chat | undefined> => {
     // DIRECT durable read — memory may be stale/partial and must not shadow it

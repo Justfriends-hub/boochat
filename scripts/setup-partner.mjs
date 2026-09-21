@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS public.external_identities (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   partner_id uuid NOT NULL REFERENCES public.partner_sources(id) ON DELETE CASCADE,
   external_user_id text NOT NULL,
-  user_id uuid NOT NULL REFERENCES public.auth.users(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   email text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT external_identities_pkey PRIMARY KEY (id),
