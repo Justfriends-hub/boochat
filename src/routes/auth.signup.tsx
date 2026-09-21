@@ -26,6 +26,27 @@ export const Route = createFileRoute("/auth/signup")({
   head: () => ({ meta: [{ title: "Create account — boochat" }] }),
 });
 
+async function finalizePartnerSession(accessToken: string, refreshToken: string, redirectTo: string) {
+  const client = ensureSupabase();
+  if (!client) throw new Error("Supabase is not configured.");
+
+  const { data, error } = await client.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+
+  if (error || !data.session) {
+    throw new Error(error?.message || "Partner session could not be restored.");
+  }
+
+  const { data: reloaded } = await client.auth.getSession();
+  if (!reloaded.session) {
+    throw new Error("Partner session was not restored.");
+  }
+
+  return reloaded.session;
+}
+
 function SignupPage() {
   const nav = useNavigate();
   const me = useAuth();
@@ -47,7 +68,7 @@ function SignupPage() {
 
   useEffect(() => {
     if (me) {
-      nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined });
+      nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined, replace: true });
     }
   }, [me, nav, invite]);
 
@@ -73,17 +94,13 @@ function SignupPage() {
       }
 
       const { accessToken, refreshToken, redirectTo } = await response.json();
-
-      // Set Supabase session
-      const client = ensureSupabase();
-      if (client && accessToken && refreshToken) {
-        await client.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-        toast.success("Welcome!");
-        nav({ to: redirectTo });
+      if (!accessToken || !refreshToken) {
+        throw new Error("Partner session was missing tokens.");
       }
+
+      await finalizePartnerSession(accessToken, refreshToken, redirectTo || "/chats");
+      toast.success("Welcome!");
+      nav({ to: redirectTo || "/chats", replace: true });
     } catch (e: any) {
       toast.error(e.message || "Partner sign-in failed");
       setBusy(false);
@@ -101,7 +118,7 @@ function SignupPage() {
         toast.success("Account created. Check your email to confirm your account.");
       } else {
         toast.success("Account created!");
-        nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined });
+        nav({ to: invite ? "/join/$inviteCode" : "/chats", params: invite ? { inviteCode: invite } : undefined, replace: true });
       }
     } catch (e: any) {
       toast.error(e.message);
@@ -118,28 +135,14 @@ function SignupPage() {
     }
   };
 
-  const handleMoneyMate = async () => {
-    setBusy(true);
-    try {
-      localStorage.setItem("boochat.moneymateSource", "1");
-      await signInWithOAuth("google");
-    } catch (e: any) {
-      localStorage.removeItem("boochat.moneymateSource");
-      toast.error(e.message || "Unable to sign in with MoneyMate.");
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-primary/5 via-background to-background p-4">
       <Card className="w-full max-w-md p-8">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-primary text-primary-foreground text-xl font-bold">M</div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {partnerContext ? "Join via Partner" : "Create your account"}
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
           <p className="text-sm text-muted-foreground">
-            {partnerContext ? "Quick sign-in" : "Join boochat in seconds"}
+            {partnerContext ? "Finish your partner sign-in" : "Start chatting in minutes"}
           </p>
         </div>
 
@@ -148,9 +151,9 @@ function SignupPage() {
             <Button
               onClick={handlePartnerAuth}
               disabled={busy}
-              className="w-full"
+              className="w-full mb-4"
             >
-              {busy ? "Signing in…" : `Continue with ${partnerContext.partner}`}
+              {busy ? "Signing in…" : "Continue with partner"}
             </Button>
             <div className="my-4 flex items-center gap-2 text-xs text-muted-foreground">
               <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
@@ -158,72 +161,43 @@ function SignupPage() {
           </>
         ) : null}
 
-        {!partnerContext && (
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <Label htmlFor="name">Display name</Label>
-              <Input id="name" value={displayName} onChange={(e) => setName(e.target.value)} required />
-            </div>
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
-            </div>
-            <div>
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
-            </div>
-            <div>
-              <Label htmlFor="confirm">Confirm password</Label>
-              <Input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
-            </div>
-            <Button type="submit" className="w-full" disabled={busy}>{busy ? "Creating…" : "Create account"}</Button>
-          </form>
-        )}
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <Label htmlFor="displayName">Display name</Label>
+            <Input id="displayName" value={displayName} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
+          </div>
+          <div>
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
+          </div>
+          <div>
+            <Label htmlFor="password">Password</Label>
+            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
+          </div>
+          <div>
+            <Label htmlFor="confirm">Confirm password</Label>
+            <Input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
+          </div>
+          <Button type="submit" className="w-full" disabled={busy}>{busy ? "Creating…" : "Create account"}</Button>
+        </form>
 
         {!partnerContext && (
           <>
             <div className="my-6 flex items-center gap-2 text-xs text-muted-foreground">
               <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2">
               {isFlashGainSource ? (
-                <Button
-                  variant="outline"
-                  onClick={handleMoneyMate}
-                  disabled={busy}
-                  className="col-span-2"
-                >
-                  {busy ? "Signing in…" : "Continue with MoneyMate"}
-                </Button>
+                <Button variant="outline" onClick={() => handleOAuth("google")} disabled={busy}>Continue with Google</Button>
               ) : (
-                [
-                  { label: "Google", provider: "google" as const },
-                  { label: "Apple", provider: "apple" as const },
-                ].map((p) => (
-                  <Button
-                    key={p.label}
-                    variant="outline"
-                    onClick={() => handleOAuth(p.provider)}
-                    disabled={busy}
-                  >
-                    {p.label}
-                  </Button>
-                ))
+                <Button variant="outline" onClick={() => handleOAuth("google")} disabled={busy}>Google</Button>
               )}
             </div>
           </>
         )}
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
-          {partnerContext ? (
-            <>
-              Need help? <Link to="/auth/login" className="font-medium text-primary hover:underline">Sign in another way</Link>
-            </>
-          ) : (
-            <>
-              Already have an account? <Link to="/auth/login" className="font-medium text-primary hover:underline">Sign in</Link>
-            </>
-          )}
+          Already have an account? <Link to="/auth/login" className="font-medium text-primary hover:underline">Sign in</Link>
         </p>
       </Card>
     </div>

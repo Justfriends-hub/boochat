@@ -46,7 +46,8 @@ function AppLayout() {
   }, [pathname]);
   useEffect(() => {
     if (!ready || typeof window === "undefined") return;
-    if (!me) nav({ to: "/auth/login" });
+    const isAuthRoute = window.location.pathname.startsWith("/auth/");
+    if (!me && !isAuthRoute) nav({ to: "/auth/login", replace: true });
   }, [me, ready, nav]);
 
   // Auto-join the "moneymate" channel when a user arrives via a MoneyMate

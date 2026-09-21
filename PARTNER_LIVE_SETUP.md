@@ -1,4 +1,4 @@
-# MoneyMate News Partner System - LIVE SETUP COMPLETE ✅
+﻿# MoneyMate News Partner System - LIVE SETUP COMPLETE ✅
 
 **Date**: September 20, 2026
 
@@ -20,13 +20,13 @@
 ### Shared Secret
 Used by MoneyMate News to sign login JWTs:
 ```
-8114f75c65eb4f5eb28c075489fdb957
+<see Vercel / Supabase>
 ```
 
 ### Webhook Secret
 Used by MoneyMate News to verify webhook payloads from Boochat:
 ```
-c85a1a5e2b7d433986ab3633d11c7eb6
+<see Vercel / Supabase>
 ```
 
 ---
@@ -63,7 +63,7 @@ Open a terminal and run:
 ```bash
 node -e "
 const crypto = require('crypto');
-const secret = '8114f75c65eb4f5eb28c075489fdb957';
+const secret = '<see Vercel / Supabase>';
 const now = Math.floor(Date.now() / 1000);
 
 const payload = {
@@ -158,7 +158,7 @@ https://boochat.vercel.app/api/partner/auth
 
 **Shared Secret**:
 ```
-8114f75c65eb4f5eb28c075489fdb957
+<see Vercel / Supabase>
 ```
 
 **Sign-In Link Format** (frontend):
@@ -170,7 +170,7 @@ https://boochat.vercel.app/auth/login?partner=moneymatnews&token=<JWT>
 
 **Webhook Secret** (for verifying incoming webhooks):
 ```
-c85a1a5e2b7d433986ab3633d11c7eb6
+<see Vercel / Supabase>
 ```
 
 **Current Webhook URL**:
@@ -218,11 +218,3 @@ If anything fails:
 | Partner Slug | `moneymatnews` |
 | Channel ID | `11e9f19b-5553-4e86-9951-231908cdd630` |
 | Channel Name | MoneyMate News 🥇 |
-| Shared Secret | `8114f75c65eb4f5eb28c075489fdb957` |
-| Webhook Secret | `c85a1a5e2b7d433986ab3633d11c7eb6` |
-| API Endpoint | `https://boochat.vercel.app/api/partner/auth` |
-| Login URL | `https://boochat.vercel.app/auth/login?partner=moneymatnews&token=<JWT>` |
-
----
-
-**Status**: ✅ LIVE - Ready for testing

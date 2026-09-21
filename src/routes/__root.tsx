@@ -152,6 +152,11 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useTheme(); // initialize theme class
 
+  // Initialize auth as early as possible so routes don't wait on it
+  useEffect(() => {
+    import("@/api/authApi").then(m => m.initializeAuth()).catch(console.warn);
+  }, []);
+
   // Initialize mock store + offline IndexedDB cache
   useEffect(() => {
     initConnectivityWatcher(); // idempotent — owns online/offline transitions
@@ -171,9 +176,10 @@ function RootComponent() {
         // After hydrating, kick off full offline warm (Telegram-style) so
         // every conversation/message/media is cached for airplane mode.
         try {
-          const auth = (await import("@/api/authApi")).getCurrentUser();
-          if (auth) scheduleWarmAllCaches(auth.id);
-          else scheduleWarmAllCaches();
+          const { initializeAuth, getCurrentUser } = await import("@/api/authApi");
+          await initializeAuth();
+          const auth = getCurrentUser();
+          if (auth?.id) scheduleWarmAllCaches(auth.id);
         } catch {}
         // If permission was previously granted, re-assert this device's
         // push subscription (idempotent; no-ops when denied/unsupported).
