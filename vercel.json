@@ -2,8 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/partner/outbox-worker",
-      "schedule": "*/5 * * * *"
+      "path": "/api/cron",
+      "schedule": "0 2 * * *"
     }
   ]
 }

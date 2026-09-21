@@ -20,8 +20,15 @@ import crypto from "crypto";
  *       x-boochat-signature: sha256=<hex HMAC-SHA256(secret, "<ts>.<rawBody>")>
  *   - Marks rows sent/failed with exponential backoff (max 10 attempts).
  *
- * Scheduling: Vercel Cron (see vercel.json, every 5 min). Also safe to call
- * manually with ?secret=. Requires CRON_SECRET env (fail closed).
+ * Scheduling: ONE daily Vercel Cron hits the shared dispatcher
+ * `GET /api/cron` (see vercel.json — Hobby plans only allow daily crons),
+ * which calls runOutboxWorker() below. Also safe to call this endpoint
+ * directly/manually with ?secret=. Requires CRON_SECRET env (fail closed).
+ *
+ * NOTE on latency: the daily Vercel cron is only a safety net. For ~5-min
+ * delivery without Vercel Pro, apply
+ * migrations/2026-09-21_partner_outbox_frequent_drain.sql (Supabase pg_cron
+ * + pg_net triggers the same /api/cron dispatcher every 5 min).
  *
  * Environment variables required:
  * - SUPABASE_URL (+ SUPABASE_SERVICE_ROLE_KEY)
@@ -30,7 +37,7 @@ import crypto from "crypto";
  *   https://moneymatesupport.online). Falls back to VITE_API_URL.
  */
 
-const ENQUEUE_WINDOW_MIN = 20;
+const DEFAULT_ENQUEUE_WINDOW_MIN = 1560; // 26h — covers the once-daily Vercel Hobby cron plus buffer. Enqueue is idempotent (UNIQUE + existing check), so a wider window is safe. Override with OUTBOX_ENQUEUE_WINDOW_MIN.
 const SEND_LIMIT = 25;
 const RECIPIENTS_PER_BATCH = 100;
 const MAX_ATTEMPTS = 10;
@@ -44,7 +51,12 @@ function hmacHex(secret: string, msg: string): string {
   return crypto.createHmac("sha256", secret).update(msg).digest("hex");
 }
 
-function isAuthorized(req: VercelRequest): boolean {
+function enqueueWindowMin(): number {
+  const raw = Number(process.env.OUTBOX_ENQUEUE_WINDOW_MIN || "");
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_ENQUEUE_WINDOW_MIN;
+}
+
+export function isAuthorized(req: VercelRequest): boolean {
   const secret = env("CRON_SECRET");
   if (!secret) return false;
   try {
@@ -89,40 +101,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   const appUrl = (env("PARTNER_APP_URL") || env("VITE_API_URL") || "").replace(/\/$/, "");
 
-  const stats = { partners: 0, enqueuedPosts: 0, enqueuedDMs: 0, sent: 0, failed: 0 };
-
   try {
-    const { data: partners, error: pErr } = await supabase
-      .from("partner_sources")
-      .select("id, slug, name, channel_id, webhook_url, webhook_secret")
-      .eq("active", true);
-    if (pErr) throw pErr;
-
-    const windowStart = new Date(Date.now() - ENQUEUE_WINDOW_MIN * 60 * 1000).toISOString();
-
-    for (const p of ((partners || []) as PartnerRow[])) {
-      stats.partners += 1;
-      try {
-        stats.enqueuedPosts += await enqueueChannelPosts(supabase, p, windowStart, appUrl);
-      } catch (e) {
-        console.error("outbox-worker: enqueue posts failed", p.slug, e);
-      }
-      try {
-        stats.enqueuedDMs += await enqueueAdminDMs(supabase, p, windowStart, appUrl);
-      } catch (e) {
-        console.error("outbox-worker: enqueue DMs failed", p.slug, e);
-      }
-    }
-
-    const sendStats = await sendPending(supabase);
-    stats.sent = sendStats.sent;
-    stats.failed = sendStats.failed;
-
+    const stats = await runOutboxWorker(supabase, appUrl);
     return res.status(200).json({ success: true, ...stats });
   } catch (e: any) {
     console.error("outbox-worker error:", e);
     return res.status(500).json({ success: false, error: "Server error" });
   }
+}
+
+/**
+ * Shared job core — also invoked by the single daily dispatcher
+ * (GET /api/cron, see api/cron.ts). Keep all cron jobs behind that one
+ * endpoint so the Hobby plan's once-per-day cron limit is never hit again:
+ * new jobs get appended to the dispatcher, never as new vercel.json entries.
+ */
+export async function runOutboxWorker(supabase: any, appUrl: string) {
+  const stats = { partners: 0, enqueuedPosts: 0, enqueuedDMs: 0, sent: 0, failed: 0 };
+
+  const { data: partners, error: pErr } = await supabase
+    .from("partner_sources")
+    .select("id, slug, name, channel_id, webhook_url, webhook_secret")
+    .eq("active", true);
+  if (pErr) throw pErr;
+
+  const windowStart = new Date(Date.now() - enqueueWindowMin() * 60 * 1000).toISOString();
+
+  for (const p of ((partners || []) as PartnerRow[])) {
+    stats.partners += 1;
+    try {
+      stats.enqueuedPosts += await enqueueChannelPosts(supabase, p, windowStart, appUrl);
+    } catch (e) {
+      console.error("outbox-worker: enqueue posts failed", p.slug, e);
+    }
+    try {
+      stats.enqueuedDMs += await enqueueAdminDMs(supabase, p, windowStart, appUrl);
+    } catch (e) {
+      console.error("outbox-worker: enqueue DMs failed", p.slug, e);
+    }
+  }
+
+  const sendStats = await sendPending(supabase);
+  stats.sent = sendStats.sent;
+  stats.failed = sendStats.failed;
+
+  return stats;
 }
 
 /** Resolve partner-linked external ids for channel members (MoneyMate ids). */
