@@ -27,12 +27,19 @@ export function BoostDialog({
       return;
     }
     try {
-      await boostPost({ adminId: me.id, postId, kind, amount });
-      toast.success(`Boosted +${amount} ${kind}`);
+      const result = await boostPost({ adminId: me.id, postId, kind, amount });
       qc.invalidateQueries();
-      onOpenChange(false);
-      setAmount(100);
-      setErr(null);
+      if (result.persisted) {
+        toast.success(`Boosted +${amount} ${kind}`);
+        onOpenChange(false);
+        setAmount(100);
+        setErr(null);
+      } else {
+        // Applied to this device only — the server write failed, so this
+        // resets on refresh. Keep the dialog open with the reason instead of
+        // a fake success toast.
+        setErr("Server save failed — boost is on this device only and will reset on refresh. Run the boost persistence SQL (see IMPLEMENTATION.md) or check RLS/RPC setup.");
+      }
     } catch (e: any) {
       setErr(e.message);
     }

@@ -427,9 +427,13 @@ function AdminPage() {
                             <Button size="sm" variant="destructive" className="gap-1"
                               onClick={async () => {
                                 if (!confirm(`Delete group "${g.name}"? This cannot be undone.`)) return;
-                                await deleteGroup(g.id, me.id);
-                                toast.success("Group deleted");
-                                qc.invalidateQueries();
+                                try {
+                                  await deleteGroup(g.id, me.id);
+                                  toast.success("Group deleted");
+                                  qc.invalidateQueries();
+                                } catch (e: any) {
+                                  toast.error(e?.message ?? "Delete failed — nothing was removed.");
+                                }
                               }}>
                               <Trash2 className="h-3 w-3" /> Delete
                             </Button>
@@ -475,9 +479,13 @@ function AdminPage() {
                               <Button size="sm" variant="destructive" className="gap-1"
                                 onClick={async () => {
                                   if (!confirm(`Delete channel "${ch.name}"? This cannot be undone.`)) return;
-                                  await deleteChannel(ch.id, me.id);
-                                  toast.success("Channel deleted");
-                                  qc.invalidateQueries();
+                                  try {
+                                    await deleteChannel(ch.id, me.id);
+                                    toast.success("Channel deleted");
+                                    qc.invalidateQueries();
+                                  } catch (e: any) {
+                                    toast.error(e?.message ?? "Delete failed — nothing was removed.");
+                                  }
                                 }}>
                                 <Trash2 className="h-3 w-3" /> Delete
                               </Button>
@@ -536,9 +544,13 @@ function AdminPage() {
                               </Button>
                               <Button size="sm" variant="destructive"
                                 onClick={async () => {
-                                  await deletePostAsAdmin(p.id, me.id);
-                                  toast.success("Post deleted");
-                                  qc.invalidateQueries();
+                                  try {
+                                    await deletePostAsAdmin(p.id, me.id);
+                                    toast.success("Post deleted");
+                                    qc.invalidateQueries();
+                                  } catch (e: any) {
+                                    toast.error(e?.message ?? "Delete failed — nothing was removed.");
+                                  }
                                 }}>
                                 <Trash2 className="h-3 w-3" />
                               </Button>

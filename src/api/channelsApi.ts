@@ -3,7 +3,7 @@ import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
 import { resolveMedia, primeMediaCache, getCachedMediaObjectUrl } from "@/lib/mediaCache";
-import { getOfflineList, getSavedList, saveList, addAction, getActions, removeAction } from "@/lib/offlineStore";
+import { getOfflineList, getSavedList, saveList, saveListForce, addAction, getActions, removeAction } from "@/lib/offlineStore";
 import { hydrateLists } from "@/lib/mockStore";
 import { channelAvatarFallback, userAvatarFallback } from "@/lib/avatar";
 import { registerActionDrain, initConnectivityWatcher } from "@/stores/syncStore";
@@ -806,63 +806,81 @@ export async function getChannelRecentActions(channelId: string): Promise<Channe
 
 export async function deleteChannel(channelId: string) {
   const supabase = ensureSupabase();
-  try {
-    const { data: postRows, error: postFetchError } = await supabase
-      .from("channel_posts")
-      .select("id")
-      .eq("channel_id", channelId);
-    if (postFetchError) throw postFetchError;
-
-    const postIds = (postRows ?? []).map((row: any) => row.id);
-    if (postIds.length > 0) {
-      const { error: reactionError } = await supabase
-        .from("channel_post_reactions")
-        .delete()
-        .in("post_id", postIds);
-      if (reactionError) throw reactionError;
+  // Best-effort cascade: one missing/blocked table must not veto the whole
+  // delete (abort-on-first-error was resurrecting channels on next refresh).
+  const stepErrors: string[] = [];
+  const tryStep = async (label: string, fn: () => PromiseLike<{ error: any }>) => {
+    try {
+      const { error } = await fn();
+      if (error) stepErrors.push(`${label}: ${error.message}`);
+    } catch (err: any) {
+      stepErrors.push(`${label}: ${err?.message ?? err}`);
     }
+  };
 
-    const { error: postsError } = await supabase
-      .from("channel_posts")
+  const { data: postRows } = await supabase
+    .from("channel_posts")
+    .select("id")
+    .eq("channel_id", channelId);
+  const postIds = ((postRows ?? []) as any[]).map((row: any) => row.id);
+  if (postIds.length > 0) {
+    await tryStep("channel_post_reactions", () => supabase
+      .from("channel_post_reactions")
       .delete()
-      .eq("channel_id", channelId);
-    if (postsError) throw postsError;
-
-    const { error: membersError } = await supabase
-      .from("channel_members")
-      .delete()
-      .eq("channel_id", channelId);
-    if (membersError) throw membersError;
-
-    const { error: removedError } = await supabase
-      .from("removed_channel_members")
-      .delete()
-      .eq("channel_id", channelId);
-    if (removedError) throw removedError;
-
-    const { error: joinError } = await supabase
-      .from("join_requests")
-      .delete()
-      .eq("channel_id", channelId);
-    if (joinError) throw joinError;
-
-    // NOTE: channel_communities is a parent entity table in the live schema
-    // (channels.community_id FK) — no per-channel rows to delete here.
-
-    const { error: channelError } = await supabase
-      .from("channels")
-      .delete()
-      .eq("id", channelId);
-    if (channelError) throw channelError;
-
-    setState((s) => {
-      s.channels = s.channels.filter((c) => c.id !== channelId);
-    });
-    publish("channels:changed");
-  } catch (err) {
-    console.error("Failed to delete channel:", err);
-    throw err;
+      .in("post_id", postIds));
   }
+
+  await tryStep("channel_posts", () => supabase
+    .from("channel_posts")
+    .delete()
+    .eq("channel_id", channelId));
+  await tryStep("channel_members", () => supabase
+    .from("channel_members")
+    .delete()
+    .eq("channel_id", channelId));
+  await tryStep("removed_channel_members", () => supabase
+    .from("removed_channel_members")
+    .delete()
+    .eq("channel_id", channelId));
+  await tryStep("join_requests", () => supabase
+    .from("join_requests")
+    .delete()
+    .eq("channel_id", channelId));
+
+  // NOTE: channel_communities is a parent entity table in the live schema
+  // (channels.community_id FK) — no per-channel rows to delete here.
+
+  await tryStep("channels", () => supabase
+    .from("channels")
+    .delete()
+    .eq("id", channelId));
+
+  // Verify the row is actually gone — never strip local state while the
+  // server still holds the channel, or it resurfaces on the next refresh.
+  const { data: stillThere, error: verifyError } = await supabase
+    .from("channels")
+    .select("id")
+    .eq("id", channelId)
+    .maybeSingle();
+  if (verifyError) {
+    throw new Error(`Could not confirm deletion on the server (${verifyError.message}). Nothing was removed locally.`);
+  }
+  if (stillThere) {
+    throw new Error(
+      `Server could not delete this channel. ${stepErrors[0] ?? "Check RLS delete policies on channels/channel_posts/channel_members."}`,
+    );
+  }
+  if (stepErrors.length) console.warn("deleteChannel: non-fatal cascade warnings:", stepErrors);
+
+  setState((s) => {
+    s.channels = s.channels.filter((c) => c.id !== channelId);
+    s.channelPosts = s.channelPosts.filter((p) => p.channelId !== channelId);
+  });
+  // Force-sync the durable mirror (saveList skips empty arrays — deleting the
+  // last channel must still wipe the mirror or it resurrects on reboot).
+  saveListForce("channels", getState().channels);
+  saveListForce("channelPosts", getState().channelPosts);
+  publish("channels:changed");
 }
 
 export async function requestJoinChannel(channelId: string, userId: string) {

@@ -237,6 +237,7 @@ export function BoostControlPanel() {
     const endTime = new Date(now.getTime() + durationHours[0] * 3600000);
 
     let error: any = null;
+    let serverOk = false;
 
     if (boostKind === 'subscribers') {
       const res = await tryUpsertChannelSettings(selectedChannel, {
@@ -246,13 +247,13 @@ export function BoostControlPanel() {
         boost_start_time: boostMode === 'gradual' ? now.toISOString() : null,
         boost_end_time: boostMode === 'gradual' ? endTime.toISOString() : null,
       });
-      error = res.error;
-      // Tables may be missing or RLS may block inserts in many deployments —
-      // subscriber boost is best-effort. Treat any recoverable error as local success
-      // and persist the boost setting locally so the admin UI reflects it offline.
-      if (error && isRecoverableBoostError(error)) {
-        console.warn('[BoostControlPanel] channel_settings unavailable (missing/RLS), falling back to local success', error);
-        // Persist locally for immediate UI feedback and offline viewing
+      if (!res.error) {
+        serverOk = true;
+      } else if (isRecoverableBoostError(res.error)) {
+        // Tables may be missing or RLS may block inserts in many deployments.
+        // Keep the setting locally so the panel still reflects it, but say so
+        // honestly: this resets on refresh until the server accepts the write.
+        console.warn('[BoostControlPanel] channel_settings unavailable (missing/RLS), falling back to local only', res.error);
         try {
           const { setAppState } = await import('@/lib/offlineStore');
           await setAppState(`boost:channelSettings:${selectedChannel}`, {
@@ -269,9 +270,10 @@ export function BoostControlPanel() {
             boost_start_time: boostMode === 'gradual' ? now.toISOString() : null,
             boost_end_time: boostMode === 'gradual' ? endTime.toISOString() : null,
           });
-          toast.success(`Boost applied locally: +${targetCount} ${boostKind} (offline-capable)`);
+          toast.warning(`Server save failed — boost kept on this device only and will reset on refresh.`);
         } catch {}
-        error = null;
+      } else {
+        error = res.error;
       }
     } else {
       if (!selectedMessage) {
@@ -282,45 +284,42 @@ export function BoostControlPanel() {
 
       const amount = parseInt(targetCount, 10);
       const kindForRpc: 'likes' | 'views' = boostKind === 'likes' ? 'likes' : 'views';
-      // Prefer the durable per-post boost tables, but if they are not deployed
-      // fall back to the existing channel_posts boosted counters via RPC / direct update.
-      const insertObj: any = {
-        message_id: selectedMessage,
-        boost_kind: boostKind,
-        boost_target: amount,
-        boost_mode: boostMode,
-        boost_start_time: boostMode === 'gradual' ? now.toISOString() : null,
-        boost_end_time: boostMode === 'gradual' ? endTime.toISOString() : null,
-        reaction: boostKind === 'likes' ? reaction || null : null,
-      };
 
-      const res = await tryInsertPostBoost(insertObj);
-      error = res.error;
-      if (error && isRecoverableBoostError(error)) {
-        console.warn('[BoostControlPanel] post_boosts unavailable (missing/RLS), falling back to boost_post RPC/direct', error);
+      // 1) Durable counters FIRST — channel_posts.boosted_likes/boosted_views
+      // are the columns every surface reads. (Previously the post_boosts
+      // audit insert ran first and a "successful" boost never touched these
+      // columns, so boosts looked reset immediately.)
+      try {
+        const { boostPost } = await import('@/api/adminApi');
+        const result = await boostPost({ adminId: (me as any).id, postId: selectedMessage, kind: kindForRpc, amount });
+        serverOk = result.persisted;
+        if (!result.persisted) {
+          toast.warning('Boost kept on this device only — server save failed. It will reset on refresh.');
+        }
+      } catch (e: any) {
+        error = e;
+      }
+
+      // 2) Best-effort audit/scheduling row — never blocks success. (In strict
+      // schemas this insert can fail on its own, e.g. chat_id FK, while the
+      // counters above saved fine.)
+      if (!error) {
+        const insertObj: any = {
+          message_id: selectedMessage,
+          boost_kind: boostKind,
+          boost_target: amount,
+          boost_mode: boostMode,
+          boost_start_time: boostMode === 'gradual' ? now.toISOString() : null,
+          boost_end_time: boostMode === 'gradual' ? endTime.toISOString() : null,
+          reaction: boostKind === 'likes' ? reaction || null : null,
+        };
         try {
-          const { boostPost } = await import('@/api/adminApi');
-          await boostPost({ adminId: (me as any).id, postId: selectedMessage, kind: kindForRpc, amount });
-          error = null;
-        } catch (e: any) {
-          console.warn('[BoostControlPanel] fallback boostPost also failed', e);
-          // Still treat as local success if the channel post exists locally
-          error = null;
-          try {
-            const { getState, setState: setMock } = await import('@/lib/mockStore');
-            const { saveList } = await import('@/lib/offlineStore');
-            const post = getState().channelPosts.find((p) => p.id === selectedMessage);
-            if (post) {
-              setMock((s) => {
-                const p = s.channelPosts.find((x) => x.id === selectedMessage);
-                if (p) {
-                  if (kindForRpc === 'likes') p.boostedLikes = (p.boostedLikes ?? 0) + amount;
-                  else p.boostedViews = (p.boostedViews ?? 0) + amount;
-                }
-              });
-              saveList('channelPosts', getState().channelPosts);
-            }
-          } catch {}
+          const auditRes = await tryInsertPostBoost(insertObj);
+          if (auditRes.error) {
+            console.warn('[BoostControlPanel] post_boosts audit row not saved (non-blocking):', (auditRes.error as any)?.message ?? auditRes.error);
+          }
+        } catch (e) {
+          console.warn('[BoostControlPanel] post_boosts audit row not saved (non-blocking):', e);
         }
       }
     }
@@ -332,9 +331,11 @@ export function BoostControlPanel() {
       return;
     }
 
-    toast.success(
-      `Boost applied: +${targetCount} ${boostKind} ${boostMode === 'gradual' ? `over ${durationHours[0]}h` : 'instantly'}`
-    );
+    if (serverOk) {
+      toast.success(
+        `Boost applied: +${targetCount} ${boostKind} ${boostMode === 'gradual' ? `over ${durationHours[0]}h` : 'instantly'}`
+      );
+    }
     loadChannelSettings(selectedChannel);
   };
 

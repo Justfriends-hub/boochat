@@ -476,22 +476,51 @@ export async function editGroup(
 }
 
 export async function deleteGroup(groupId: string, adminId: string) {
-  try {
-    const client = ensureSupabase();
-    // Delete group metadata, members, messages and chat row where possible
-    await client.from("group_members").delete().eq("group_id", groupId).throwOnError();
-    await client.from("groups").delete().eq("chat_id", groupId).throwOnError();
-    await client.from("chat_members").delete().eq("chat_id", groupId).throwOnError();
-    await client.from("messages").delete().eq("chat_id", groupId).throwOnError();
-    await client.from("chats").delete().eq("id", groupId).throwOnError();
-  } catch (err) {
-    console.warn("deleteGroup: supabase delete failed, applying locally:", err);
-    warnLocalOnly("Group deletion");
+  // Best-effort cascade: ONE blocked/missing table must not veto the whole
+  // delete (that was the "deleted chats resurface" bug — the first
+  // throwOnError aborted everything, the error was swallowed, and the next
+  // server refresh re-added the still-existing rows).
+  const client = ensureSupabase();
+  const stepErrors: string[] = [];
+  const tryStep = async (label: string, fn: () => PromiseLike<{ error: any }>) => {
+    try {
+      const { error } = await fn();
+      if (error) stepErrors.push(`${label}: ${error.message}`);
+    } catch (err: any) {
+      stepErrors.push(`${label}: ${err?.message ?? err}`);
+    }
+  };
+  await tryStep("group_members", () => client.from("group_members").delete().eq("group_id", groupId));
+  await tryStep("groups", () => client.from("groups").delete().eq("chat_id", groupId));
+  await tryStep("chat_members", () => client.from("chat_members").delete().eq("chat_id", groupId));
+  await tryStep("messages", () => client.from("messages").delete().eq("chat_id", groupId));
+  await tryStep("chats", () => client.from("chats").delete().eq("id", groupId));
+
+  // Verify the row is actually gone — NEVER report success (or strip local
+  // state) while the server still holds the chat, or it resurfaces on the
+  // next refresh / next delete. A failed verification read is also a failure:
+  // keeping the row locally is the safe direction (no fake success).
+  const { data: stillThere, error: verifyError } = await client.from("chats").select("id").eq("id", groupId).maybeSingle();
+  if (verifyError) {
+    throw new Error(`Could not confirm deletion on the server (${verifyError.message}). Nothing was removed locally.`);
   }
+  if (stillThere) {
+    throw new Error(
+      `Server could not delete this chat. ${stepErrors[0] ?? "Check RLS delete policies on chats/chat_members/messages/groups."}`,
+    );
+  }
+  if (stepErrors.length) console.warn("deleteGroup: non-fatal cascade warnings:", stepErrors);
+
   setState((s) => {
     s.chats = s.chats.filter((c) => c.id !== groupId);
     s.messages = s.messages.filter((m) => m.chatId !== groupId);
   });
+  // Force-sync the durable mirror (saveList skips empty arrays — deleting the
+  // last chat must still wipe the mirror or it resurrects on reboot).
+  try {
+    const { saveListForce } = await import("@/lib/offlineStore");
+    saveListForce("chats", getState().chats);
+  } catch {}
   audit({ adminId, action: "delete_group", targetType: "group", targetId: groupId });
   publish("chats:changed");
 }
@@ -540,7 +569,7 @@ export async function transferGroupOwnership(groupId: string, newOwnerId: string
 
 export async function boostPost(input: {
   adminId: string; postId: string; kind: "likes" | "views"; amount: number;
-}): Promise<Boost> {
+}): Promise<Boost & { persisted: boolean }> {
   if (input.amount <= 0) throw new Error("Boost amount must be greater than zero.");
 
   // Try server-side boosts with graceful degradation:
@@ -619,16 +648,18 @@ export async function boostPost(input: {
 
   if (!serverApplied && lastError) {
     console.warn("boostPost: all server attempts failed, applying locally:", lastError?.message ?? lastError);
-    // Not fatal — we still apply locally below. Only warnLocalOnly if we had a server error
-    // that is not just "function not found / table not found" to avoid spamming.
+    // Not fatal for the in-session UI — we still apply locally below — but
+    // the caller MUST surface this honestly (local-only boosts reset on
+    // refresh). Only toast here for non-schema errors to avoid spamming.
     const msg = String(lastError?.message ?? lastError ?? "").toLowerCase();
     const isMissingFnOrTable = msg.includes("could not find") || msg.includes("does not exist") || msg.includes("function");
     if (!isMissingFnOrTable) warnLocalOnly("Boost");
   }
 
-  const boost: Boost = {
+  const boost: Boost & { persisted: boolean } = {
     id: uid(), adminId: input.adminId, postId: input.postId,
     kind: input.kind, amount: input.amount, createdAt: Date.now(),
+    persisted: serverApplied,
   };
   setState((s) => {
     const p = s.channelPosts.find((x) => x.id === input.postId);
@@ -649,14 +680,18 @@ export async function boostPost(input: {
 }
 
 export async function deletePostAsAdmin(postId: string, adminId: string) {
-  try {
-    const client = ensureSupabase();
-    await client.from("channel_posts").delete().eq("id", postId);
-  } catch (err) {
-    console.warn("deletePostAsAdmin: supabase delete failed, applying locally:", err);
-    warnLocalOnly("Post deletion");
-  }
+  const client = ensureSupabase();
+  const { error } = await client.from("channel_posts").delete().eq("id", postId);
+  if (error) throw new Error(`Server could not delete this post: ${error.message}`);
+  // Verify — a surviving row would resurface on the next refresh.
+  const { data: stillThere, error: verifyError } = await client.from("channel_posts").select("id").eq("id", postId).maybeSingle();
+  if (verifyError) throw new Error(`Could not confirm deletion on the server (${verifyError.message}). Nothing was removed locally.`);
+  if (stillThere) throw new Error("Server could not delete this post. Check RLS delete policies on channel_posts.");
   setState((s) => { s.channelPosts = s.channelPosts.filter((p) => p.id !== postId); });
+  try {
+    const { saveListForce } = await import("@/lib/offlineStore");
+    saveListForce("channelPosts", getState().channelPosts);
+  } catch {}
   audit({ adminId, action: "delete_post", targetType: "post", targetId: postId });
   publish("channels:changed");
 }
@@ -695,17 +730,11 @@ export async function editChannel(
 }
 
 export async function deleteChannel(channelId: string, adminId: string) {
-  try {
-    // Full cascade (posts, reactions, members, removed members, join requests, communities)
-    await deleteChannelCascade(channelId);
-  } catch (err) {
-    console.warn("deleteChannel: supabase cascade failed, applying locally:", err);
-    setState((s) => {
-      s.channels = s.channels.filter((c) => c.id !== channelId);
-      s.channelPosts = s.channelPosts.filter((p) => p.channelId !== channelId);
-    });
-    publish("channels:changed");
-  }
+  // Full cascade (posts, reactions, members, removed members, join requests, communities).
+  // The cascade verifies server-side itself and THROWS on failure — a failed
+  // delete must surface as an error toast, never as fake success followed by
+  // the channel resurfacing on the next refresh.
+  await deleteChannelCascade(channelId);
   audit({ adminId, action: "delete_channel", targetType: "channel", targetId: channelId });
 }
 
