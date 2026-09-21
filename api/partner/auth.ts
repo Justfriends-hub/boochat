@@ -226,6 +226,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // 10. Enqueue member_joined event (for webhook worker)
+    let joinedChannelName = "";
+    try {
+      const { data: chRow } = await supabase
+        .from("channels")
+        .select("name")
+        .eq("id", partnerRow.channel_id)
+        .maybeSingle();
+      joinedChannelName = String((chRow as any)?.name || "");
+    } catch {}
     await supabase.from("partner_webhook_outbox").insert({
       partner_id: partnerRow.id,
       event_id: `joined:${partnerRow.id}:${payload.ext_user_id}`,
@@ -235,7 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         type: "member_joined",
         partner: partnerSlug,
         channel_id: partnerRow.channel_id,
-        channel_name: "string", // Will be fetched by worker
+        channel_name: joinedChannelName,
         recipients: [payload.ext_user_id],
       },
     });
