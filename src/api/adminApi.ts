@@ -440,6 +440,31 @@ export async function forceLogoutUser(userId: string, adminId: string) {
 
 // ─── Groups ───────────────────────────────────────────────────────────────
 
+/**
+ * Owner fast path: SECURITY DEFINER RPCs (owner_delete_*) bypass RLS entirely,
+ * so owner deletes land no matter the table policies. Tri-state result:
+ * - "ok": server done + verified inside the RPC — skip the RLS cascade.
+ * - "missing": RPC not deployed yet — fall through to the RLS path.
+ * - "denied": deployed but refused (not owner/admin, or blocked) — throw.
+ */
+export async function tryOwnerRpc(
+  fn: string,
+  params: Record<string, unknown>,
+): Promise<{ status: "ok" | "missing" | "denied"; message?: string }> {
+  try {
+    const client = ensureSupabase();
+    const { error } = await (client as any).rpc(fn, params);
+    if (!error) return { status: "ok" };
+    const msg = String(error.message ?? "");
+    if (error.code === "PGRST202" || msg.toLowerCase().includes("could not find the function")) {
+      return { status: "missing" };
+    }
+    return { status: "denied", message: msg };
+  } catch (e: any) {
+    return { status: "denied", message: e?.message ?? String(e) };
+  }
+}
+
 export async function editGroup(
   groupId: string,
   adminId: string,
@@ -476,40 +501,49 @@ export async function editGroup(
 }
 
 export async function deleteGroup(groupId: string, adminId: string) {
-  // Best-effort cascade: ONE blocked/missing table must not veto the whole
-  // delete (that was the "deleted chats resurface" bug — the first
-  // throwOnError aborted everything, the error was swallowed, and the next
-  // server refresh re-added the still-existing rows).
   const client = ensureSupabase();
-  const stepErrors: string[] = [];
-  const tryStep = async (label: string, fn: () => PromiseLike<{ error: any }>) => {
-    try {
-      const { error } = await fn();
-      if (error) stepErrors.push(`${label}: ${error.message}`);
-    } catch (err: any) {
-      stepErrors.push(`${label}: ${err?.message ?? err}`);
-    }
-  };
-  await tryStep("group_members", () => client.from("group_members").delete().eq("group_id", groupId));
-  await tryStep("groups", () => client.from("groups").delete().eq("chat_id", groupId));
-  await tryStep("chat_members", () => client.from("chat_members").delete().eq("chat_id", groupId));
-  await tryStep("messages", () => client.from("messages").delete().eq("chat_id", groupId));
-  await tryStep("chats", () => client.from("chats").delete().eq("id", groupId));
 
-  // Verify the row is actually gone — NEVER report success (or strip local
-  // state) while the server still holds the chat, or it resurfaces on the
-  // next refresh / next delete. A failed verification read is also a failure:
-  // keeping the row locally is the safe direction (no fake success).
-  const { data: stillThere, error: verifyError } = await client.from("chats").select("id").eq("id", groupId).maybeSingle();
-  if (verifyError) {
-    throw new Error(`Could not confirm deletion on the server (${verifyError.message}). Nothing was removed locally.`);
+  // Owner fast path first: bypasses RLS entirely (see owner-full-power.sql).
+  const owner = await tryOwnerRpc("owner_delete_chat", { p_chat_id: groupId });
+  if (owner.status === "denied") {
+    throw new Error(`Owner delete failed: ${owner.message ?? "unknown reason"}`);
   }
-  if (stillThere) {
-    throw new Error(
-      `Server could not delete this chat. ${stepErrors[0] ?? "Check RLS delete policies on chats/chat_members/messages/groups."}`,
-    );
+  if (owner.status !== "ok") {
+    // Fallback RLS cascade when the owner RPC isn't deployed yet.
+    // Best-effort: ONE blocked/missing table must not veto the whole delete
+    // (that was the "deleted chats resurface" bug — the first throwOnError
+    // aborted everything, the error was swallowed, and the next server
+    // refresh re-added the still-existing rows).
+    const stepErrors: string[] = [];
+    const tryStep = async (label: string, fn: () => PromiseLike<{ error: any }>) => {
+      try {
+        const { error } = await fn();
+        if (error) stepErrors.push(`${label}: ${error.message}`);
+      } catch (err: any) {
+        stepErrors.push(`${label}: ${err?.message ?? err}`);
+      }
+    };
+    await tryStep("group_members", () => client.from("group_members").delete().eq("group_id", groupId));
+    await tryStep("groups", () => client.from("groups").delete().eq("chat_id", groupId));
+    await tryStep("chat_members", () => client.from("chat_members").delete().eq("chat_id", groupId));
+    await tryStep("messages", () => client.from("messages").delete().eq("chat_id", groupId));
+    await tryStep("chats", () => client.from("chats").delete().eq("id", groupId));
+
+    // Verify the row is actually gone — NEVER report success (or strip local
+    // state) while the server still holds the chat, or it resurfaces on the
+    // next refresh / next delete. A failed verification read is also a failure:
+    // keeping the row locally is the safe direction (no fake success).
+    const { data: stillThere, error: verifyError } = await client.from("chats").select("id").eq("id", groupId).maybeSingle();
+    if (verifyError) {
+      throw new Error(`Could not confirm deletion on the server (${verifyError.message}). Nothing was removed locally.`);
+    }
+    if (stillThere) {
+      throw new Error(
+        `Server could not delete this chat. ${stepErrors[0] ?? "Check RLS delete policies on chats/chat_members/messages/groups."}`,
+      );
+    }
+    if (stepErrors.length) console.warn("deleteGroup: non-fatal cascade warnings:", stepErrors);
   }
-  if (stepErrors.length) console.warn("deleteGroup: non-fatal cascade warnings:", stepErrors);
 
   setState((s) => {
     s.chats = s.chats.filter((c) => c.id !== groupId);
@@ -681,12 +715,21 @@ export async function boostPost(input: {
 
 export async function deletePostAsAdmin(postId: string, adminId: string) {
   const client = ensureSupabase();
-  const { error } = await client.from("channel_posts").delete().eq("id", postId);
-  if (error) throw new Error(`Server could not delete this post: ${error.message}`);
-  // Verify — a surviving row would resurface on the next refresh.
-  const { data: stillThere, error: verifyError } = await client.from("channel_posts").select("id").eq("id", postId).maybeSingle();
-  if (verifyError) throw new Error(`Could not confirm deletion on the server (${verifyError.message}). Nothing was removed locally.`);
-  if (stillThere) throw new Error("Server could not delete this post. Check RLS delete policies on channel_posts.");
+
+  // Owner fast path first: bypasses RLS entirely (see owner-full-power.sql).
+  const owner = await tryOwnerRpc("owner_delete_post", { p_post_id: postId });
+  if (owner.status === "denied") {
+    throw new Error(`Owner delete failed: ${owner.message ?? "unknown reason"}`);
+  }
+  if (owner.status !== "ok") {
+    // Fallback RLS path when the owner RPC isn't deployed yet.
+    const { error } = await client.from("channel_posts").delete().eq("id", postId);
+    if (error) throw new Error(`Server could not delete this post: ${error.message}`);
+    // Verify — a surviving row would resurface on the next refresh.
+    const { data: stillThere, error: verifyError } = await client.from("channel_posts").select("id").eq("id", postId).maybeSingle();
+    if (verifyError) throw new Error(`Could not confirm deletion on the server (${verifyError.message}). Nothing was removed locally.`);
+    if (stillThere) throw new Error("Server could not delete this post. Check RLS delete policies on channel_posts.");
+  }
   setState((s) => { s.channelPosts = s.channelPosts.filter((p) => p.id !== postId); });
   try {
     const { saveListForce } = await import("@/lib/offlineStore");

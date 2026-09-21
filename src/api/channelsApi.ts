@@ -804,9 +804,36 @@ export async function getChannelRecentActions(channelId: string): Promise<Channe
   return [];
 }
 
+/**
+ * Owner fast path: SECURITY DEFINER RPC bypasses RLS entirely.
+ * "missing" = RPC not deployed yet, fall back to the RLS cascade.
+ */
+async function tryOwnerDeleteChannel(channelId: string): Promise<{ status: "ok" | "missing" | "denied"; message?: string }> {
+  try {
+    const supabase = ensureSupabase();
+    const { error } = await (supabase as any).rpc("owner_delete_channel", { p_channel_id: channelId });
+    if (!error) return { status: "ok" };
+    const msg = String(error.message ?? "");
+    if (error.code === "PGRST202" || msg.toLowerCase().includes("could not find the function")) {
+      return { status: "missing" };
+    }
+    return { status: "denied", message: msg };
+  } catch (e: any) {
+    return { status: "denied", message: e?.message ?? String(e) };
+  }
+}
+
 export async function deleteChannel(channelId: string) {
   const supabase = ensureSupabase();
-  // Best-effort cascade: one missing/blocked table must not veto the whole
+
+  // Owner fast path first: bypasses RLS entirely (see owner-full-power.sql).
+  const owner = await tryOwnerDeleteChannel(channelId);
+  if (owner.status === "denied") {
+    throw new Error(`Owner delete failed: ${owner.message ?? "unknown reason"}`);
+  }
+  if (owner.status !== "ok") {
+  // Fallback RLS cascade when the owner RPC isn't deployed yet.
+  // Best-effort: one missing/blocked table must not veto the whole
   // delete (abort-on-first-error was resurrecting channels on next refresh).
   const stepErrors: string[] = [];
   const tryStep = async (label: string, fn: () => PromiseLike<{ error: any }>) => {
@@ -871,6 +898,7 @@ export async function deleteChannel(channelId: string) {
     );
   }
   if (stepErrors.length) console.warn("deleteChannel: non-fatal cascade warnings:", stepErrors);
+  } // end fallback RLS cascade (owner RPC already verified server-side)
 
   setState((s) => {
     s.channels = s.channels.filter((c) => c.id !== channelId);

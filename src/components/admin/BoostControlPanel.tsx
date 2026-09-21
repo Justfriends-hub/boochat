@@ -253,7 +253,7 @@ export function BoostControlPanel() {
         // Tables may be missing or RLS may block inserts in many deployments.
         // Keep the setting locally so the panel still reflects it, but say so
         // honestly: this resets on refresh until the server accepts the write.
-        console.warn('[BoostControlPanel] channel_settings unavailable (missing/RLS), falling back to local only', res.error);
+        console.warn('[BoostControlPanel] channel_settings unavailable (missing/RLS/FK), falling back to local only', res.error);
         try {
           const { setAppState } = await import('@/lib/offlineStore');
           await setAppState(`boost:channelSettings:${selectedChannel}`, {

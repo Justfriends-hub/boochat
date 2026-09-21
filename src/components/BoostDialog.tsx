@@ -38,7 +38,7 @@ export function BoostDialog({
         // Applied to this device only — the server write failed, so this
         // resets on refresh. Keep the dialog open with the reason instead of
         // a fake success toast.
-        setErr("Server save failed — boost is on this device only and will reset on refresh. Run the boost persistence SQL (see IMPLEMENTATION.md) or check RLS/RPC setup.");
+        setErr("Server save failed — boost is on this device only and will reset on refresh. Run owner-full-power.sql in Supabase SQL Editor to grant owner/admin write power.");
       }
     } catch (e: any) {
       setErr(e.message);
