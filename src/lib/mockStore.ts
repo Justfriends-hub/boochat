@@ -1,7 +1,6 @@
 // Central in-memory + localStorage-backed mock store.
 // All *Api modules read/write here. Swap for Supabase later without changing consumers.
 import { publish } from "./eventBus";
-import { seed } from "./seed";
 
 export type Role = "user" | "member" | "owner";
 
@@ -244,25 +243,28 @@ export function setState(mutator: (s: Store) => void) {
 
 
 export function initStore() {
+  // Demo auto-seed is permanently disabled: every new / partner user must
+  // start with EMPTY chats + channels. The only exceptions are real server
+  // memberships (1:1 DM created via getOrCreateDM / partner support flow, or
+  // a channel joined via invite link / partner flow) — those arrive through
+  // the Supabase-backed APIs below, never through local placeholders.
+  // This also purges any legacy demo rows still lingering in memory so admin
+  // deletes of "Startup Stories / Tech Weekly / Design Inspiration" stick.
   if (typeof window === "undefined") return;
-  const hasChannelSeed = state.channels.length > 0 || state.channelPosts.length > 0 || state.comments.length > 0;
-  if (hasChannelSeed) return;
-
-  try {
-    seed(state);
-    // Note: do NOT save demo data to localStorage; it will be kept in-memory only
-    // so it persists during the session. This provides a fallback when Supabase fails.
-  } catch (error) {
-    console.warn("Unable to seed demo channel data:", error);
-  }
+  setState((s) => {
+    purgeDemoSeed(s);
+  });
 }
 
 // Ensure seed is always available on demand (used as fallback when APIs fail)
 export function ensureSeed() {
+  // No-op by design — see initStore(). New users must see empty lists, never
+  // resurrected placeholders. Kept as a function so existing call sites don't
+  // need to change; it only purges stragglers.
   if (typeof window === "undefined") return;
-  const hasChannelSeed = state.channels.length > 0 || state.channelPosts.length > 0;
-  if (hasChannelSeed) return;
-  initStore();
+  setState((s) => {
+    purgeDemoSeed(s);
+  });
 }
 
 export function resetStore() {
@@ -281,20 +283,152 @@ export function hydrateLists(lists: {
   statuses?: Status[];
 }) {
   if (typeof window === "undefined") return;
-  const hasAny = Object.values(lists).some((v) => v && v.length > 0);
-  if (!hasAny) return;
+  // Drop demo placeholders from anything rehydrated out of IndexedDB before
+  // it can touch memory — otherwise a stale mirror resurrects deleted
+  // channels on every cold start.
+  const clean = <T extends { id?: string; channelId?: string }>(items?: T[]): T[] | undefined => {
+    if (!items?.length) return items;
+    return items.filter((it: any) => {
+      const id = String(it?.id ?? "");
+      const channelId = String(it?.channelId ?? "");
+      return !isDemoChannelId(id) && !isDemoChatId(id) && !isDemoUserId(id) && !isDemoChannelId(channelId);
+    });
+  };
+  const users = clean(lists.users);
+  const chats = clean(lists.chats);
+  const channels = clean(lists.channels);
+  const channelPosts = clean(lists.channelPosts);
+  const hasAny =
+    (users?.length ?? 0) > 0 ||
+    (chats?.length ?? 0) > 0 ||
+    (channels?.length ?? 0) > 0 ||
+    (channelPosts?.length ?? 0) > 0 ||
+    (lists.statuses?.length ?? 0) > 0;
+  if (!hasAny) {
+    // Still purge memory in case it already holds demo rows.
+    setState((s) => {
+      purgeDemoSeed(s);
+    });
+    return;
+  }
   setState((s) => {
-    if (!s.users.length && lists.users?.length) s.users = lists.users;
-    if (!s.chats.length && lists.chats?.length) s.chats = lists.chats;
-    if (!s.channels.length && lists.channels?.length) s.channels = lists.channels;
-    if (!s.channelPosts.length && lists.channelPosts?.length) s.channelPosts = lists.channelPosts;
+    if (!s.users.length && users?.length) s.users = users as User[];
+    if (!s.chats.length && chats?.length) s.chats = chats as Chat[];
+    if (!s.channels.length && channels?.length) s.channels = channels as Channel[];
+    if (!s.channelPosts.length && channelPosts?.length) s.channelPosts = channelPosts as ChannelPost[];
     if (!s.statuses.length && lists.statuses?.length) {
       s.statuses = lists.statuses.filter((st) => Date.now() - st.createdAt < 24 * 60 * 60 * 1000);
     }
+    purgeDemoSeed(s);
   });
 }
 
 // Function declaration (hoisted) so the circular import from ./seed is safe.
 export function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+// Demo placeholder IDs shipped by the old local seed (seed.ts). These are
+// NOT real Supabase rows — they resurrect in the UI + IndexedDB mirror every
+// time the store is empty, which is why admin deletes never stuck and every
+// new/partner user saw "Startup Stories / Tech Weekly / Design Inspiration"
+// plus demo DMs. They are banished on sight (see purgeDemoSeed below).
+const DEMO_CHANNEL_IDS = new Set(["channel-1", "channel-2", "channel-3"]);
+const DEMO_CHAT_IDS = new Set(["chat-1", "chat-2", "chat-3", "chat-4", "group-1"]);
+const DEMO_USER_IDS = new Set([
+  "admin-1",
+  "user-1",
+  "user-2",
+  "user-3",
+  "user-4",
+  "user-5",
+  "user-6",
+]);
+
+function isDemoChannelId(id: string) {
+  return DEMO_CHANNEL_IDS.has(id);
+}
+
+function isDemoChatId(id: string) {
+  return DEMO_CHAT_IDS.has(id);
+}
+
+function isDemoUserId(id: string) {
+  return DEMO_USER_IDS.has(id);
+}
+
+/**
+ * One-time durable purge: strip demo placeholders out of the IndexedDB mirror
+ * itself (list:channels / list:chats / list:channelPosts / list:users) and
+ * force-save — even when the result is empty. Without the force-save, the
+ * stale mirror resurrects "Startup Stories / Tech Weekly / Design
+ * Inspiration" on every cold start and admin deletes never stick.
+ */
+export async function purgeDemoMirror(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const { getAppState, setAppState } = await import("./offlineStore");
+    const demoChannelIds = ["channel-1", "channel-2", "channel-3"];
+    const demoChatIds = ["chat-1", "chat-2", "chat-3", "chat-4", "group-1"];
+    const demoUserIds = ["admin-1", "user-1", "user-2", "user-3", "user-4", "user-5", "user-6"];
+    const demoNames = ["tech weekly", "design inspiration", "startup stories"];
+
+    const cleanChannels = (items: any[]) =>
+      items.filter((c) => {
+        const id = String(c?.id ?? "");
+        if (demoChannelIds.includes(id)) return false;
+        if (demoNames.includes(String(c?.name ?? "").trim().toLowerCase()) && !/^[0-9a-f-]{36}$/i.test(id)) return false;
+        return true;
+      });
+    const cleanChats = (items: any[]) => items.filter((c) => !demoChatIds.includes(String(c?.id ?? "")));
+    const cleanPosts = (items: any[]) => items.filter((p) => !demoChannelIds.includes(String(p?.channelId ?? "")));
+    const cleanUsers = (items: any[]) => items.filter((u) => !demoUserIds.includes(String(u?.id ?? "")));
+
+    const jobs: Array<{ key: string; clean: (items: any[]) => any[] }> = [
+      { key: "list:channels", clean: cleanChannels },
+      { key: "list:chats", clean: cleanChats },
+      { key: "list:channelPosts", clean: cleanPosts },
+      { key: "list:users", clean: cleanUsers },
+    ];
+    for (const { key, clean } of jobs) {
+      try {
+        const saved = await getAppState<any[]>(key);
+        if (!Array.isArray(saved) || !saved.length) continue;
+        const next = clean(saved);
+        if (next.length !== saved.length) {
+          await setAppState(key, next);
+        }
+      } catch {}
+    }
+  } catch {}
+}
+export function purgeDemoSeed(s: Store): boolean {
+  let removed = false;
+  const keepChannels = s.channels.filter((c) => !isDemoChannelId(c.id));
+  if (keepChannels.length !== s.channels.length) {
+    s.channels = keepChannels;
+    removed = true;
+  }
+  const demoChannelIds = DEMO_CHANNEL_IDS;
+  const keepPosts = s.channelPosts.filter((p) => !demoChannelIds.has(p.channelId));
+  if (keepPosts.length !== s.channelPosts.length) {
+    s.channelPosts = keepPosts;
+    removed = true;
+  }
+  const keepChats = s.chats.filter((c) => !isDemoChatId(c.id));
+  if (keepChats.length !== s.chats.length) {
+    s.chats = keepChats;
+    removed = true;
+  }
+  const demoChatIds = DEMO_CHAT_IDS;
+  const keepMessages = s.messages.filter((m) => !demoChatIds.has(m.chatId));
+  if (keepMessages.length !== s.messages.length) {
+    s.messages = keepMessages;
+    removed = true;
+  }
+  const keepUsers = s.users.filter((u) => !isDemoUserId(u.id));
+  if (keepUsers.length !== s.users.length) {
+    s.users = keepUsers;
+    removed = true;
+  }
+  return removed;
 }

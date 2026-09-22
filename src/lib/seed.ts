@@ -12,6 +12,15 @@ const AVATARS = [
 ];
 
 export function seed(s: Store) {
+  // Demo placeholders (Tech Weekly / Design Inspiration / Startup Stories +
+  // demo DMs) are retired: new + partner users must start EMPTY. This function
+  // is kept only so legacy imports don't break — it intentionally does
+  // nothing unless explicitly opted in via window.__BOOCHAT_DEMO_SEED.
+  if (typeof window !== "undefined" && !(window as any).__BOOCHAT_DEMO_SEED) return;
+  seedDemo(s);
+}
+
+function seedDemo(s: Store) {
   const now = Date.now();
 
   const admin = {

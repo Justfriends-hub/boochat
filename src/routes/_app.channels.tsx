@@ -32,7 +32,14 @@ function ChannelsPage() {
   const [description, setDescription] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
-  const { data: channels = [] } = useQuery({ queryKey: ["channels"], queryFn: listChannels });
+  const { data: channels = [] } = useQuery({
+    // Member-scoped: a new / partner user with no memberships gets [] and
+    // the "No available channel" empty state. Only channels they actually
+    // joined (invite link, partner flow, created themselves) appear here.
+    queryKey: ["channels", me?.id ?? ""],
+    queryFn: () => listChannels(me?.id),
+    enabled: !!me,
+  });
   useEffect(() => subscribeToChannels(() => qc.invalidateQueries({ queryKey: ["channels"] })), [qc]);
   useEffect(() => {
     const unsub = subscribe("channels:changed", () => qc.invalidateQueries({ queryKey: ["channels"] }));
@@ -62,7 +69,7 @@ function ChannelsPage() {
         ownerId: me.id,
         onlyAdminsPost: true,
       });
-      qc.setQueryData(["channels"], (old: any) => old ? [ch, ...old] : [ch]);
+      qc.setQueryData(["channels", me.id], (old: any) => old ? [ch, ...old] : [ch]);
       toast.success("Channel created successfully!");
       setCreateOpen(false);
       setName("");
@@ -88,8 +95,8 @@ function ChannelsPage() {
           {channels.length === 0 ? (
             <EmptyState
               icon={Radio}
-              title="No channels yet"
-              description="Be the first to create a public channel to share updates with your followers."
+              title="No available channel"
+              description="You haven't joined any channel yet. Channels you join via an invite link will show up here."
               action={
                 <Button onClick={() => setCreateOpen(true)} className="gap-1">
                   <Plus className="h-4 w-4" /> Create Channel

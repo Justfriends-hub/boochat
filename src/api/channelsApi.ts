@@ -1,4 +1,4 @@
-import { getState, setState, uid, ensureSeed, type Channel, type ChannelPost, type Comment, type JoinRequest } from "@/lib/mockStore";
+import { getState, setState, uid, type Channel, type ChannelPost, type Comment, type JoinRequest } from "@/lib/mockStore";
 import { publish, subscribe } from "@/lib/eventBus";
 import { ensureSupabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { uploadImage, getImageUrl, batchGetImageUrls, deleteStorageFile } from "@/lib/imageUpload";
@@ -11,6 +11,16 @@ import type { QueuedAction } from "@/lib/db";
 
 function isFullUrl(value?: string): boolean {
   return !!value && /^(https?:\/\/|data:|blob:)/i.test(value);
+}
+
+// Legacy local-seed placeholders (Tech Weekly / Design Inspiration / Startup
+// Stories). Never real Supabase rows — must never render, even from a stale
+// IndexedDB mirror.
+function isLegacyDemoChannel(c: Channel): boolean {
+  const id = String(c?.id ?? "");
+  if (id === "channel-1" || id === "channel-2" || id === "channel-3") return true;
+  const names = ["tech weekly", "design inspiration", "startup stories"];
+  return names.includes(String(c?.name ?? "").trim().toLowerCase()) && !/^[0-9a-f-]{36}$/i.test(id);
 }
 
 function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
@@ -102,28 +112,50 @@ async function fetchChannelMembers(channelIds: string[]) {
   }
 }
 
-export async function listChannels(): Promise<Channel[]> {
-  ensureSeed();
+export async function listChannels(userId?: string): Promise<Channel[]> {
+  // Member-scoped channel list.
+  // - Regular surfaces pass the signed-in user's id: only channels where
+  //   memberIds includes them are returned. A brand-new user, or a partner
+  //   user who just arrived via /api/partner/auth, therefore sees an EMPTY
+  //   list ("No available channel") unless the partner flow / invite link
+  //   actually made them a member (server-side channel_members upsert) or
+  //   they opened a channel directly by id and joined it.
+  // - Admin surfaces omit userId to keep the full moderation view.
+  const scopeToMember = (list: Channel[]) => {
+    const live = list.filter((c) => !isLegacyDemoChannel(c));
+    if (!userId) return live;
+    return live.filter((c) => c.memberIds.includes(userId));
+  };
   const getCached = async (): Promise<Channel[]> => {
     const mem = getState().channels;
-    if (mem.length) return mem;
+    if (mem.length) {
+      const scoped = scopeToMember(mem);
+      if (scoped.length) return scoped;
+      if (userId) return [];
+    }
     // DIRECT durable read first — memory may be empty-stale
     const saved = await getSavedList<Channel>("channels");
     if (saved.length) {
-      hydrateLists({ channels: saved });
-      return saved;
+      const scoped = scopeToMember(saved);
+      if (scoped.length) {
+        hydrateLists({ channels: scoped });
+        return scoped;
+      }
+      // Mirror holds only other users' / demo channels — this user has none.
+      if (userId) return [];
+      hydrateLists({ channels: saved.filter((c) => !isLegacyDemoChannel(c)) });
+      return scopeToMember(saved);
     }
-    return getOfflineList(
+    const local = await getOfflineList(
       () => getState().channels,
       "channels",
       (items) => hydrateLists({ channels: items }),
     );
+    return scopeToMember(local);
   };
 
   if (typeof window !== "undefined" && !navigator.onLine) {
-    const f = await getCached();
-    if (f.length) return f;
-    return f;
+    return getCached();
   }
 
   const cached = await getCached();
@@ -143,7 +175,7 @@ export async function listChannels(): Promise<Channel[]> {
         const remoteChannel = mapChannel(ch, allMembers, adminIds);
         if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
         return remoteChannel;
-      });
+      }).filter((c) => !isLegacyDemoChannel(c));
       // Persist DURABLE raw-path version; resolve avatars for display only.
       setState((s) => { s.channels = remoteChannels; });
       saveList("channels", remoteChannels);
@@ -180,7 +212,7 @@ export async function listChannels(): Promise<Channel[]> {
         const remoteChannel = mapChannel(ch, allMembers, adminIds);
         if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
         return remoteChannel;
-      });
+      }).filter((c) => !isLegacyDemoChannel(c));
       // Durable raw version persisted before display resolution
       setState((s) => { s.channels = remoteChannels; });
       saveList("channels", remoteChannels);
@@ -191,19 +223,23 @@ export async function listChannels(): Promise<Channel[]> {
           return r ? { ...c, avatar: r.avatar, wallpaper: r.wallpaper } : c;
         });
       });
-      return remoteChannels;
+      return scopeToMember(remoteChannels);
     }
     if (channelError) console.error("listChannels: failed to query Supabase channels", channelError);
   } catch (error) {
     console.warn("Unable to load remote channels, returning cached channels:", error);
   }
   const fallbackChannels = await getCached();
-  console.warn(`[Supabase offline] Returning ${fallbackChannels.length} cached/seeded channels`);
+  console.warn(`[Supabase offline] Returning ${fallbackChannels.length} cached channels`);
   return fallbackChannels;
 }
 
 export async function getChannel(id: string): Promise<Channel | undefined> {
-  ensureSeed();
+  // Direct-link flow: a channel opened by id (/channels/:id, /join/:code,
+  // partner redirect) must resolve even when it is NOT in the user's list —
+  // the list stays empty until they actually become a member. Demo
+  // placeholders can never resolve here.
+  if (id === "channel-1" || id === "channel-2" || id === "channel-3") return undefined;
   const findInMemory = () => getState().channels.find((c) => c.id === id);
   const findInMirror = async (): Promise<Channel | undefined> => {
     // DIRECT durable read — memory must not shadow the mirror
@@ -1026,21 +1062,24 @@ async function findPostAnywhere(id: string): Promise<ChannelPost | undefined> {
 }
 
 export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
-  ensureSeed();
+  if (channelId === "channel-1" || channelId === "channel-2" || channelId === "channel-3") return [];
+  const isDemoPost = (p: ChannelPost) =>
+    p.channelId === "channel-1" || p.channelId === "channel-2" || p.channelId === "channel-3";
   const getCachedPosts = async (): Promise<ChannelPost[]> => {
     const all = await getOfflineList(
       () => getState().channelPosts,
       "channelPosts",
       (items) => hydrateLists({ channelPosts: items }),
     );
-    const filtered = channelId ? all.filter((p) => p.channelId === channelId) : [...all];
+    const live = all.filter((p) => !isDemoPost(p));
+    const filtered = channelId ? live.filter((p) => p.channelId === channelId) : [...live];
     const sorted = filtered.sort((a, b) => b.createdAt - a.createdAt);
     return hydrateChannelPostMedia(sorted);
   };
 
   if (typeof window !== "undefined" && !navigator.onLine) {
     const cached = await getCachedPosts();
-    console.warn(`[Supabase offline] Returning ${cached.length} cached/seeded posts for channel ${channelId || "all"}`);
+    console.warn(`[Supabase offline] Returning ${cached.length} cached posts for channel ${channelId || "all"}`);
     return cached;
   }
 
@@ -1178,7 +1217,6 @@ export async function listPosts(channelId?: string): Promise<ChannelPost[]> {
 }
 
 export async function getPost(id: string): Promise<ChannelPost | undefined> {
-  ensureSeed();
   if (typeof window !== "undefined" && !navigator.onLine) {
     const hit = await findPostAnywhere(id);
     if (!hit) return undefined;

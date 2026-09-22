@@ -61,6 +61,14 @@ function isValidSupabaseId(value: string | null | undefined): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
+// Legacy local-seed placeholder chats (never real Supabase rows). They must
+// never render, even if a stale IndexedDB mirror still holds them.
+function isLegacyDemoChatId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  const v = id.trim();
+  return v === "group-1" || /^chat-\d+$/i.test(v);
+}
+
 async function fetchChatMembers(chatIds: string[]) {
   try {
     const supabase = ensureSupabase();
@@ -85,29 +93,35 @@ export async function listChats(userId: string): Promise<Chat[]> {
     return [];
   }
 
-  const filterByMember = (list: Chat[]) => list.filter((c) => c.memberIds.includes(userId));
+  const filterByMember = (list: Chat[]) =>
+    list.filter((c) => c.memberIds.includes(userId) && !isLegacyDemoChatId(c.id));
 
   /**
-   * Durable cache read. Order: memory → IndexedDB mirror (ALWAYS consulted
-   * when memory misses the member, since memory may be a stale/partial
-   * snapshot that shadows the mirror). Member filter is relaxed to an
-   * unfiltered fallback — a mirror saved on this device is user-scoped
-   * already, and strict filtering is what produced "no chats" false negatives.
+   * Durable cache read — STRICTLY member-scoped. A new user, or a partner
+   * user arriving via /api/partner/auth, must see an EMPTY chat list unless
+   * the server says they belong to a chat (1:1 DM via getOrCreateDM / the
+   * partner support flow creates exactly one such membership, so only that
+   * person appears). Never fall back to the unfiltered mirror: the IndexedDB
+   * mirror is device-scoped, not user-scoped, and returning it unfiltered is
+   * what leaked other users' chats (and demo placeholders) into fresh
+   * accounts.
    */
   const getCached = async (): Promise<{ list: Chat[]; durableOnly: boolean }> => {
     const mem = getState().chats;
-    if (mem.length) {
-      const f = filterByMember(mem);
-      if (f.length) return { list: f, durableOnly: false };
-    }
-    // Read the mirror DIRECTLY (bypasses memory shadowing)
+    const memFiltered = filterByMember(mem);
+    if (memFiltered.length) return { list: memFiltered, durableOnly: false };
+    // Read the mirror DIRECTLY (bypasses memory shadowing), strictly filtered.
     const saved = await getSavedList<Chat>("chats");
     if (saved.length) {
-      hydrateLists({ chats: saved });
-      const f = filterByMember(saved);
-      return { list: f.length ? f : saved, durableOnly: true };
+      const savedFiltered = filterByMember(saved);
+      if (savedFiltered.length) {
+        hydrateLists({ chats: savedFiltered });
+        return { list: savedFiltered, durableOnly: true };
+      }
+      // Mirror holds only other users' / demo chats — this user has none.
+      return { list: [], durableOnly: true };
     }
-    return { list: mem.length ? filterByMember(mem).length ? filterByMember(mem) : mem : [], durableOnly: true };
+    return { list: memFiltered, durableOnly: true };
   };
 
   // Offline: serve instantly from durable cache with live avatar URLs
@@ -118,6 +132,17 @@ export async function listChats(userId: string): Promise<Chat[]> {
 
   // Online cache-first: warm cache → instant paint + background refresh
   const cached = await getCached();
+  const clearIfEmpty = async () => {
+    // Server is the source of truth: zero memberships means the user really
+    // has no chats — wipe any stale memory/mirror rows so a fresh account
+    // never inherits another user's list from this device.
+    const { saveListForce } = await import("@/lib/offlineStore");
+    setState((s) => {
+      s.chats = s.chats.filter((c) => c.memberIds.includes(userId) && !isLegacyDemoChatId(c.id));
+    });
+    saveListForce("chats", getState().chats.filter((c) => c.memberIds.includes(userId)));
+    publish("chats:changed");
+  };
   const doBgRefresh = async () => {
     try {
       const supabase = ensureSupabase();
@@ -127,7 +152,10 @@ export async function listChats(userId: string): Promise<Chat[]> {
         .eq("user_id", userId);
       if (membershipError || !membershipRows) return;
       const chatIds = membershipRows.map((row) => row.chat_id);
-      if (!chatIds.length) return;
+      if (!chatIds.length) {
+        await clearIfEmpty();
+        return;
+      }
       const { data: chats, error: chatError } = await supabase
         .from("chats")
         .select("*")
@@ -168,31 +196,34 @@ export async function listChats(userId: string): Promise<Chat[]> {
       .eq("user_id", userId);
     if (!membershipError && membershipRows) {
       const chatIds = membershipRows.map((row) => row.chat_id);
-      if (chatIds.length) {
-        const { data: chats, error: chatError } = await supabase
-          .from("chats")
-          .select("*")
-          .in("id", chatIds)
-          .order("updated_at", { ascending: false });
-        if (!chatError && chats) {
-          const memberRows = await fetchChatMembers(chatIds);
-          const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
-          const groups = groupsData.data ?? [];
-          const remoteChats = chats.map((chatRow) => {
-            const members = memberRows.filter((row) => row.chat_id === chatRow.id).map((row) => row.user_id);
-            const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
-            const cachedOne = getState().chats.find((c) => c.id === chatRow.id);
-            const remoteChat = mapChat(chatRow, members, group);
-            if (cachedOne?.visibility) remoteChat.visibility = cachedOne.visibility;
-            return remoteChat;
-          });
-          setState((s) => { s.chats = remoteChats; });
-          saveList("chats", remoteChats);
-          return rehydrateChatAvatars(remoteChats);
-        }
-      } else {
+      if (!chatIds.length) {
+        // Brand-new / partner user with no DM yet — stay empty. Do NOT fall
+        // back to cached/demo rows.
+        await clearIfEmpty();
         return [];
       }
+      const { data: chats, error: chatError } = await supabase
+        .from("chats")
+        .select("*")
+        .in("id", chatIds)
+        .order("updated_at", { ascending: false });
+      if (!chatError && chats) {
+        const memberRows = await fetchChatMembers(chatIds);
+        const groupsData = await supabase.from("groups").select("*").in("chat_id", chatIds);
+        const groups = groupsData.data ?? [];
+        const remoteChats = chats.map((chatRow) => {
+          const members = memberRows.filter((row) => row.chat_id === chatRow.id).map((row) => row.user_id);
+          const group = groups.find((g) => g.chat_id === chatRow.id) ?? null;
+          const cachedOne = getState().chats.find((c) => c.id === chatRow.id);
+          const remoteChat = mapChat(chatRow, members, group);
+          if (cachedOne?.visibility) remoteChat.visibility = cachedOne.visibility;
+          return remoteChat;
+        });
+        setState((s) => { s.chats = remoteChats; });
+        saveList("chats", remoteChats);
+        return rehydrateChatAvatars(remoteChats);
+      }
+      return [];
     }
   } catch (error) {
     console.warn("Unable to load remote chats, returning cached chats:", error);

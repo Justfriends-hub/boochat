@@ -12,7 +12,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { initStore, hydrateLists, type User, type Chat, type Channel, type ChannelPost, type Status } from "@/lib/mockStore";
+import { initStore, hydrateLists, purgeDemoMirror, type User, type Chat, type Channel, type ChannelPost, type Status } from "@/lib/mockStore";
 import { useTheme } from "@/hooks/useTheme";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { InstallPromptBanner } from "@/components/InstallPromptBanner";
@@ -165,6 +165,9 @@ function RootComponent() {
     // offline cold starts render chats/channels/users instantly.
     initOfflineStore()
       .then(async () => {
+        // One-time cleanup: evict retired demo placeholders from the durable
+        // mirror so admin deletes stick and fresh users start empty.
+        try { await purgeDemoMirror(); } catch {}
         const [users, chats, channels, channelPosts, statuses] = await Promise.all([
           getAppState<User[]>("list:users"),
           getAppState<Chat[]>("list:chats"),

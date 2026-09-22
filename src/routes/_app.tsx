@@ -33,8 +33,8 @@ function AppLayout() {
     (pathname.startsWith("/groups/") && pathname !== "/groups")
   );
 
-  // initStore still ensures seeding; the store is loaded synchronously at module
-  // initialization so we can render a cached snapshot immediately.
+  // initStore purges any retired demo placeholders; new users start empty
+  // and only see chats/channels the server says they belong to.
   useEffect(() => { initStore(); }, []);
   // Persist last viewed pathname so cached snapshot better reflects user's last screen
   useEffect(() => {
@@ -136,7 +136,7 @@ function AppLayout() {
     void Promise.allSettled([
       qc.prefetchQuery({ queryKey: ["users"], queryFn: listUsers, staleTime: 30_000 }),
       qc.prefetchQuery({ queryKey: ["chats", me.id], queryFn: () => listChats(me.id), staleTime: 15_000 }),
-      qc.prefetchQuery({ queryKey: ["channels"], queryFn: listChannels, staleTime: 15_000 }),
+      qc.prefetchQuery({ queryKey: ["channels", me.id], queryFn: () => listChannels(me.id), staleTime: 15_000 }),
     ]);
   }, [me, qc, ready]);
 

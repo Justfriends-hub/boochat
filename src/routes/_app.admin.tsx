@@ -121,7 +121,7 @@ function AdminPage() {
   const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: listUsers });
   const { data: upgradedRows = [] } = useQuery({ queryKey: ["admin.upgraded"], queryFn: listUpgradedUsers });
   const { data: posts = [] } = useQuery({ queryKey: ["admin.posts"], queryFn: () => listPosts() });
-  const { data: channels = [] } = useQuery({ queryKey: ["admin.channels"], queryFn: listChannels });
+  const { data: channels = [] } = useQuery({ queryKey: ["admin.channels"], queryFn: () => listChannels() });
   const { data: groups = [] } = useQuery({ queryKey: ["admin.groups"], queryFn: () => getState().chats.filter((c) => c.type === "group") });
   const { data: statuses = [] } = useQuery({ queryKey: ["admin.statuses"], queryFn: () => listActiveStatuses() });
   const { data: boosts = [] } = useQuery({ queryKey: ["admin.boosts"], queryFn: listBoosts });
