@@ -345,6 +345,26 @@ export function Composer({
             });
             onChange(replaced === value ? `${value}${value ? " " : ""}${body}` : replaced);
             setShowPicker(false);
+            // If the quick reply carries a picture, attach it so it sends
+            // together with the text as its caption. Fetched as a File so the
+            // normal upload pipeline handles delivery; falls back to text-only
+            // if the image can't be fetched.
+            if (picked.image) {
+              void (async () => {
+                try {
+                  const res = await fetch(picked.image as string);
+                  if (!res.ok) return;
+                  const blob = await res.blob();
+                  if (!blob.type.startsWith("image/")) return;
+                  const ext = blob.type.split("/")[1] || "jpg";
+                  const file = new File([blob], `quick-reply-${Date.now()}.${ext}`, { type: blob.type });
+                  if (pendingImage) URL.revokeObjectURL(pendingImage.preview);
+                  setPendingImage({ file, preview: URL.createObjectURL(file) });
+                } catch {
+                  // Text is already in the composer — send goes ahead without the picture.
+                }
+              })();
+            }
             textareaRef.current?.focus();
           }}
           onClose={() => setShowPicker(false)}

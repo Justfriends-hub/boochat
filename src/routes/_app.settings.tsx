@@ -28,6 +28,12 @@ function QuickRepliesManager({ meId }: { meId: string }) {
   const [shortcut, setShortcut] = useState("");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [replaceId, setReplaceId] = useState<string | null>(null);
+  const addFileRef = useRef<HTMLInputElement>(null);
+  const replaceFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -38,10 +44,56 @@ function QuickRepliesManager({ meId }: { meId: string }) {
 
   const refresh = async () => { setLoading(true); const res = await listQuickReplies(meId); setItems(res); setLoading(false); };
 
+  const clearImagePick = () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    setImageFile(null);
+    if (addFileRef.current) addFileRef.current.value = "";
+  };
+
+  const handlePickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(f);
+    setImagePreview(URL.createObjectURL(f));
+    e.target.value = "";
+  };
+
   const handleAdd = async () => {
+    setSaving(true);
     try {
-      await createQuickReply(meId, { shortcut: shortcut.trim(), title: title.trim() || shortcut.trim(), body: body });
+      const created: any = await createQuickReply(meId, { shortcut: shortcut.trim(), title: title.trim() || shortcut.trim(), body, imageFile: imageFile ?? undefined });
       setShortcut(""); setTitle(""); setBody("");
+      clearImagePick();
+      await refresh();
+      if (created?.imageSkipped) {
+        alert("Quick reply saved WITHOUT its picture — the server needs migrations/2026-09-23_quick_reply_images.sql applied first.");
+      }
+    } catch (err: any) {
+      alert(err.message || String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReplaceImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    const id = replaceId;
+    e.target.value = "";
+    setReplaceId(null);
+    if (!f || !id) return;
+    try {
+      await updateQuickReply(id, { imageFile: f });
+      await refresh();
+    } catch (err: any) {
+      alert(err.message || String(err));
+    }
+  };
+
+  const handleRemoveImage = async (id: string) => {
+    try {
+      await updateQuickReply(id, { image: null });
       await refresh();
     } catch (err: any) {
       alert(err.message || String(err));
@@ -66,8 +118,28 @@ function QuickRepliesManager({ meId }: { meId: string }) {
         <Input placeholder="title" value={title} onChange={(e)=>setTitle(e.target.value)} />
         <Input placeholder="body" value={body} onChange={(e)=>setBody(e.target.value)} />
       </div>
+      <div className="mt-2 flex items-center gap-2">
+        <input ref={addFileRef} type="file" accept="image/*" hidden onChange={handlePickImage} />
+        {imagePreview ? (
+          <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border bg-muted">
+            <img src={imagePreview} alt="Quick reply preview" className="h-full w-full object-cover" />
+            <button
+              type="button"
+              onClick={clearImagePick}
+              aria-label="Remove picture"
+              className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-destructive text-[10px] text-destructive-foreground"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </div>
+        ) : (
+          <Button type="button" variant="outline" size="sm" onClick={() => addFileRef.current?.click()}>
+            Add picture
+          </Button>
+        )}
+      </div>
       <div className="flex gap-2 mt-2">
-        <Button onClick={handleAdd} disabled={loading || items.length >= 50}>Add</Button>
+        <Button onClick={handleAdd} disabled={loading || saving || items.length >= 50 || !shortcut.trim()}>{saving ? "Saving…" : "Add"}</Button>
         <div className="text-sm text-muted-foreground self-center">{items.length}/50 used</div>
       </div>
 
@@ -75,11 +147,35 @@ function QuickRepliesManager({ meId }: { meId: string }) {
         {loading ? <div>Loading…</div> : (
           items.map((it, idx) => (
             <div key={it.id} className="flex items-center justify-between gap-2 border rounded p-2">
-              <div className="min-w-0">
-                <div className="font-medium truncate">{it.title} <span className="text-xs text-muted-foreground">/{it.shortcut}</span></div>
-                <div className="text-sm text-muted-foreground truncate">{it.body}</div>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                {it.image ? (
+                  <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted">
+                    <img
+                      src={it.image}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }}
+                    />
+                    <button
+                      type="button"
+                      title="Remove picture"
+                      onClick={() => handleRemoveImage(it.id)}
+                      aria-label="Remove picture"
+                      className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-destructive text-[10px] text-destructive-foreground"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                ) : null}
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate">{it.title} <span className="text-xs text-muted-foreground">/{it.shortcut}</span></div>
+                  <div className="text-sm text-muted-foreground truncate">{it.body}</div>
+                </div>
               </div>
               <div className="flex items-center gap-1">
+                <Button size="icon" variant="ghost" title="Add/replace picture" onClick={() => { setReplaceId(it.id); replaceFileRef.current?.click(); }} aria-label="Add or replace picture">
+                  <Camera className="h-3.5 w-3.5" />
+                </Button>
                 <Button size="icon" variant="ghost" onClick={()=>move(idx, -1)} aria-label="Move up">▲</Button>
                 <Button size="icon" variant="ghost" onClick={()=>move(idx, 1)} aria-label="Move down">▼</Button>
                 <Button size="icon" variant="ghost" onClick={()=>handleDelete(it.id)} aria-label="Delete">✕</Button>
@@ -87,6 +183,7 @@ function QuickRepliesManager({ meId }: { meId: string }) {
             </div>
           ))
         )}
+        <input ref={replaceFileRef} type="file" accept="image/*" hidden onChange={handleReplaceImage} />
       </div>
     </div>
   );

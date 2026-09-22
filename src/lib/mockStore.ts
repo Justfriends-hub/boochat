@@ -183,6 +183,10 @@ export type QuickReply = {
   position: number;
   createdAt: number;
   updatedAt?: number;
+  /** Display-ready image URL (resolved signed/public URL, or local preview). */
+  image?: string;
+  /** Durable Supabase Storage path (chat-media bucket) — survives reloads. */
+  _imagePath?: string;
 };
 
 export type Draft = { chatId: string; text: string };

@@ -831,8 +831,9 @@ function PostDetail({ post, posts, channel, onClose }: { post: ChannelPost; post
 
   // Send handler: call addComment API (persist) and rely on subscription to pipeline-add the comment
   const handleSend = async (p: { kind: string; body: string }) => {
-    if (p.kind !== 'text') return;
-    const trimmed = p.body.trim();
+    // Channel comments are text-only: an image quick reply still sends its
+    // caption text rather than being silently dropped.
+    const trimmed = (p.body || "").trim();
     if (!trimmed) return;
     await addComment({ postId: post.id, authorId: me.id, body: trimmed });
     setDraft("");

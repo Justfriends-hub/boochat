@@ -34,9 +34,23 @@ export default function QuickReplyPicker({ query, onSelect, onClose }: Props) {
           <CommandList>
             {items.length === 0 && <CommandEmpty>No quick replies</CommandEmpty>}
             {items.map((it) => (
-              <CommandItem key={it.id} onSelect={() => { onSelect(it); }}>
-                <div className="flex flex-col">
-                  <div className="font-medium">{it.title}</div>
+              <CommandItem key={it.id} onSelect={() => { onSelect(it); }} className="gap-2">
+                {it.image ? (
+                  <span className="block h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted">
+                    <img
+                      src={it.image}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }}
+                    />
+                  </span>
+                ) : (
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
+                    {(it.title || it.shortcut || "?").charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <div className="flex min-w-0 flex-col">
+                  <div className="font-medium truncate">{it.title}</div>
                   <div className="text-sm text-muted-foreground truncate">/{it.shortcut} — {it.body}</div>
                 </div>
               </CommandItem>
