@@ -46,6 +46,19 @@ export function Composer({
   const [showPicker, setShowPicker] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
 
+  // "/" quick-reply trigger: a "/" starting the text (or following a space)
+  // opens the picker; the word after "/" filters the user's saved replies.
+  const handleChange = (next: string) => {
+    onChange(next);
+    const m = /(?:^|\s)\/(\S*)$/.exec(next);
+    if (m) {
+      setPickerQuery(m[1] ?? "");
+      setShowPicker(true);
+    } else if (showPicker) {
+      setShowPicker(false);
+    }
+  };
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -123,6 +136,7 @@ export function Composer({
     if (!v) return;
     onSend({ kind: "text", body: v });
     onChange("");
+    setShowPicker(false);
   };
 
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
@@ -279,11 +293,16 @@ export function Composer({
                   ref={textareaRef}
                   rows={1}
                   value={value}
-                  onChange={(e) => onChange(e.target.value)}
+                  onChange={(e) => handleChange(e.target.value)}
                   placeholder={placeholder}
                   disabled={disabled}
                   className="max-h-32 min-h-10 flex-1 resize-none overflow-y-auto rounded-2xl border bg-background px-3 py-2 text-sm outline-none ring-0 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   onKeyDown={(e) => {
+                    if (e.key === "Escape" && showPicker) {
+                      e.stopPropagation();
+                      setShowPicker(false);
+                      return;
+                    }
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       send();
@@ -318,8 +337,15 @@ export function Composer({
         <QuickReplyPicker
           query={pickerQuery}
           onSelect={(picked) => {
-            onChange(`${value}${value ? " " : ""}${picked}`);
+            const body = picked.body;
+            // Replace the trailing /shortcut token with the reply text.
+            const replaced = value.replace(/(?:^|\s)\/\S*$/, (match) => {
+              const leading = match.startsWith("/") ? "" : match.charAt(0);
+              return `${leading}${body}`;
+            });
+            onChange(replaced === value ? `${value}${value ? " " : ""}${body}` : replaced);
             setShowPicker(false);
+            textareaRef.current?.focus();
           }}
           onClose={() => setShowPicker(false)}
         />

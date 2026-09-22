@@ -7,7 +7,7 @@ import {
   Scripts,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
@@ -37,22 +37,105 @@ function NotFoundComponent() {
   );
 }
 
+function isChunkLoadError(error: unknown): boolean {
+  const hay = `${(error as any)?.name ?? ""} ${(error as any)?.message ?? ""} ${String(error ?? "")}`;
+  return /chunk|dynamically import|importing a module|failed to fetch/i.test(hay);
+}
+
+/**
+ * Drop the service worker's cached app shell, then hard-reload so the
+ * browser fetches a fresh shell + chunks. This self-heals the "stale deep
+ * link" trap: after a deploy, a cached shell references deleted hashed
+ * chunks and the route import fails forever (Retry just re-runs the same
+ * failed import; phone users can't edit the URL to escape).
+ */
+async function purgeStaleShellAndReload(): Promise<void> {
+  try {
+    if (typeof window !== "undefined" && "caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((k) => k.startsWith("meshly-shell-"))
+          .map((k) => caches.delete(k).catch(() => false)),
+      );
+    }
+  } catch {}
+  window.location.reload();
+}
+
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error("Root route error:", error);
   const router = useRouter();
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
+  const chunkError = isChunkLoadError(error);
+  const [reloading, setReloading] = useState(false);
+  // Auto-recover ONCE per tab for stale-chunk failures: retrying the failed
+  // import can never succeed, so go straight to a fresh shell.
+  useEffect(() => {
+    if (!chunkError || typeof window === "undefined") return;
+    try {
+      if (sessionStorage.getItem("boochat.chunk-recovered") === "1") return;
+      sessionStorage.setItem("boochat.chunk-recovered", "1");
+    } catch {
+      return;
+    }
+    setReloading(true);
+    void purgeStaleShellAndReload();
+  }, [chunkError]);
+  const doReload = () => {
+    setReloading(true);
+    void purgeStaleShellAndReload();
+  };
   return (
     <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent mb-3" />
-      <p className="text-sm font-medium text-muted-foreground">Loading page...</p>
-      <button
-        onClick={() => { router.invalidate(); reset(); }}
-        className="mt-4 text-xs text-primary underline"
-      >
-        Retry now
-      </button>
+      {reloading ? (
+        <>
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent mb-3" />
+          <p className="text-sm font-medium text-muted-foreground">Updating app…</p>
+        </>
+      ) : (
+        <>
+          <p className="text-sm font-medium text-muted-foreground">
+            {chunkError ? "A new version is available." : "Loading page..."}
+          </p>
+          <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+            {chunkError
+              ? "This screen is out of date and couldn't open. Reload to get the latest version — your chats are safe."
+              : "Something went wrong opening this screen. Your chats are safe."}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {chunkError ? (
+              <button
+                onClick={doReload}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Reload app
+              </button>
+            ) : (
+              <button
+                onClick={() => { router.invalidate(); reset(); }}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Retry now
+              </button>
+            )}
+            <button
+              onClick={() => { router.navigate({ to: "/chats", replace: true }); reset(); }}
+              className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium"
+            >
+              Back to chats
+            </button>
+          </div>
+          <details className="mt-4 max-w-sm text-left">
+            <summary className="cursor-pointer text-xs text-muted-foreground underline">Details</summary>
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-[11px] text-muted-foreground">
+              {error?.message || String(error)}
+            </pre>
+          </details>
+        </>
+      )}
     </div>
   );
 }

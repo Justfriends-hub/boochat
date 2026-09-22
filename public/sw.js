@@ -15,8 +15,8 @@
  *
  * Cache versioning: bump SHELL_CACHE / ASSET_CACHE together to force-evict.
  */
-const SHELL_CACHE = "meshly-shell-v5";
-const ASSET_CACHE = "meshly-assets-v5";
+const SHELL_CACHE = "meshly-shell-v6";
+const ASSET_CACHE = "meshly-assets-v6";
 const IMAGE_CACHE = "meshly-images-v1";
 
 const APP_SHELL = ["/", "/manifest.webmanifest"];
