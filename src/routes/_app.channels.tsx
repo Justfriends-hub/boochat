@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
 import { FeatureBoundary } from "@/components/FeatureBoundary";
-import { listChannels, createChannel, subscribeToChannels } from "@/api/channelsApi";
+import { listChannels, createChannel, subscribeToChannels, displaySubscriberCount } from "@/api/channelsApi";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
@@ -115,7 +115,7 @@ function ChannelsPage() {
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold">{c.name}</p>
                       <p className="truncate text-sm text-muted-foreground">{c.description || "No description"}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{c.memberIds.length} subscriber{c.memberIds.length === 1 ? "" : "s"}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{displaySubscriberCount(c)} subscriber{displaySubscriberCount(c) === 1 ? "" : "s"}</p>
                     </div>
                   </Link>
                 </li>

@@ -23,6 +23,125 @@ function isLegacyDemoChannel(c: Channel): boolean {
   return names.includes(String(c?.name ?? "").trim().toLowerCase()) && !/^[0-9a-f-]{36}$/i.test(id);
 }
 
+// ── Subscriber-boost display pipeline ─────────────────────────────────────
+// Why this exists: the admin Boost panel writes subscriber boosts to the
+// `channel_settings` table, but every user-facing surface rendered
+// `memberIds.length` (organic members only) — so boosts NEVER showed up no
+// matter the mode. These helpers read the boost row and compute the visible
+// total: organic + boost add-on (instant = full target at once, gradual =
+// linear ramp between start/end). Organic truth always stays in memberIds.
+
+export type ChannelBoostSetting = {
+  boostTarget: number;
+  boostKind: string;
+  boostMode: "instant" | "gradual";
+  boostStartTime: number | null;
+  boostEndTime: number | null;
+};
+
+/** Visible boost add-on for a setting, evaluated at `now`. */
+export function boostedSubscriberDelta(setting: ChannelBoostSetting | undefined, now: number = Date.now()): number {
+  if (!setting || setting.boostKind !== "subscribers") return 0;
+  const target = Math.max(0, Math.floor(Number(setting.boostTarget) || 0));
+  if (!target) return 0;
+  if (setting.boostMode !== "gradual") return target; // instant: full jump
+  const start = setting.boostStartTime ?? now;
+  const end = setting.boostEndTime ?? now;
+  if (!(end > start)) return target;
+  if (now <= start) return 0;
+  if (now >= end) return target; // fully delivered — boost stays visible
+  return Math.floor(target * ((now - start) / (end - start)));
+}
+
+/** What users should SEE as the subscriber count (organic + boost add-on). */
+export function displaySubscriberCount(ch: Pick<Channel, "memberIds" | "boostedSubscribers"> | null | undefined): number {
+  const organic = ch?.memberIds.length ?? 0;
+  return organic + (ch?.boostedSubscribers ?? 0);
+}
+
+function toBoostSetting(row: any): ChannelBoostSetting {
+  return {
+    boostTarget: Number(row?.boost_target) || 0,
+    boostKind: String(row?.boost_kind ?? "subscribers"),
+    boostMode: row?.boost_mode === "instant" ? "instant" : "gradual",
+    boostStartTime: row?.boost_start_time ? new Date(row.boost_start_time).getTime() : null,
+    boostEndTime: row?.boost_end_time ? new Date(row.boost_end_time).getTime() : null,
+  };
+}
+
+/**
+ * Batch-read subscriber-boost rows for channels. Tolerant by design: the
+ * table may be missing, RLS may block reads, or the deploy may key rows by
+ * `chat_id` (legacy) vs `channel_id`. Anything unreadable falls back to
+ * device-local panel settings, then to "no boost" — never throws.
+ */
+export async function fetchChannelBoostMap(channelIds: string[]): Promise<Map<string, ChannelBoostSetting>> {
+  const map = new Map<string, ChannelBoostSetting>();
+  if (!channelIds.length) return map;
+  try {
+    const supabase = ensureSupabase();
+    let rows: any[] | null = null;
+    const attempt = await supabase
+      .from("channel_settings")
+      .select("chat_id,boost_target,boost_kind,boost_mode,boost_start_time,boost_end_time")
+      .in("chat_id", channelIds);
+    if (!attempt.error) {
+      rows = attempt.data ?? [];
+    } else {
+      const msg = `${attempt.error.message ?? ""} ${attempt.error.details ?? ""}`.toLowerCase();
+      const keyMissing = msg.includes("chat_id") && (msg.includes("column") || msg.includes("could not find"));
+      if (keyMissing) {
+        const retry = await supabase
+          .from("channel_settings")
+          .select("channel_id,boost_target,boost_kind,boost_mode,boost_start_time,boost_end_time")
+          .in("channel_id", channelIds);
+        if (!retry.error) {
+          rows = (retry.data ?? []).map((r: any) => ({ ...r, chat_id: r.channel_id }));
+        }
+      }
+      // Missing table / RLS / FK-schema issues → local fallback below.
+    }
+    for (const r of rows ?? []) {
+      const id = String(r?.chat_id ?? "");
+      if (!id || !channelIds.includes(id) || map.has(id)) continue;
+      map.set(id, toBoostSetting(r));
+    }
+  } catch {
+    // Offline — local fallback below still applies.
+  }
+  // Device-local boosts (admin panel keeps the setting here when the server
+  // rejected the write, so it still previews on this device).
+  try {
+    const { getAppState } = await import("@/lib/offlineStore");
+    await Promise.all(
+      channelIds.map(async (id) => {
+        if (map.has(id)) return;
+        try {
+          const local = await getAppState<any>(`boost:channelSettings:${id}`);
+          if (local && Number(local.boost_target) > 0) map.set(id, toBoostSetting(local));
+        } catch {}
+      }),
+    );
+  } catch {}
+  return map;
+}
+
+/** Attach computed `boostedSubscribers` add-ons to freshly fetched channels. */
+async function applySubscriberBoosts(channels: Channel[], channelIds: string[]): Promise<Channel[]> {
+  let boostMap: Map<string, ChannelBoostSetting>;
+  try {
+    boostMap = await fetchChannelBoostMap(channelIds);
+  } catch {
+    return channels;
+  }
+  if (!boostMap.size) return channels;
+  const now = Date.now();
+  return channels.map((c) => {
+    const delta = boostedSubscriberDelta(boostMap.get(c.id), now);
+    return delta > 0 ? { ...c, boostedSubscribers: delta } : c;
+  });
+}
+
 function mapChannel(row: any, members: string[], adminIds: string[]): Channel {
   const visibility = row.visibility ?? (row.is_public === false ? "private" : "public");
   const defaultReactionEmojis = ["❤️", "👍", "🎉", "😮", "💲"];
@@ -176,6 +295,8 @@ export async function listChannels(userId?: string): Promise<Channel[]> {
         if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
         return remoteChannel;
       }).filter((c) => !isLegacyDemoChannel(c));
+      // Visible subscriber boosts (organic members + admin boost add-on).
+      remoteChannels = await applySubscriberBoosts(remoteChannels, channelIds);
       // Persist DURABLE raw-path version; resolve avatars for display only.
       setState((s) => { s.channels = remoteChannels; });
       saveList("channels", remoteChannels);
@@ -213,6 +334,8 @@ export async function listChannels(userId?: string): Promise<Channel[]> {
         if (cachedOne?.visibility) remoteChannel.visibility = cachedOne.visibility;
         return remoteChannel;
       }).filter((c) => !isLegacyDemoChannel(c));
+      // Visible subscriber boosts (organic members + admin boost add-on).
+      remoteChannels = await applySubscriberBoosts(remoteChannels, channelIds);
       // Durable raw version persisted before display resolution
       setState((s) => { s.channels = remoteChannels; });
       saveList("channels", remoteChannels);
@@ -288,6 +411,11 @@ export async function getChannel(id: string): Promise<Channel | undefined> {
       const cached = findInMemory();
       const remoteChannel = mapChannel(channelRow, allMembers, adminIds);
       if (cached?.visibility) remoteChannel.visibility = cached.visibility;
+      // Visible subscriber boost (organic members + admin boost add-on).
+      try {
+        const [boosted] = await applySubscriberBoosts([remoteChannel], [id]);
+        if (boosted?.boostedSubscribers) remoteChannel.boostedSubscribers = boosted.boostedSubscribers;
+      } catch {}
       // Persist durable raw version FIRST (paths survive reloads)
       setState((s) => {
         const idx = s.channels.findIndex((c) => c.id === id);

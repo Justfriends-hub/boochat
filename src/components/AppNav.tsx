@@ -1,15 +1,23 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { MessageCircle, Circle, Radio, Users, Phone, Settings, ShieldCheck } from "lucide-react";
+// NOTE: Status / Groups / Calls are hidden from users for now — nothing is
+// deleted, the routes and components still exist and can be re-enabled by
+// uncommenting the lines marked HIDDEN below.
+import { MessageCircle, Radio, Settings, ShieldCheck } from "lucide-react";
+// HIDDEN (re-enable with the nav items below): Circle, Users, Phone
+// import { Circle, Users, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { normalizeRole } from "@/lib/mockStore";
 
 const items = [
   { to: "/chats", label: "Chats", icon: MessageCircle },
-  { to: "/status", label: "Status", icon: Circle },
+  // HIDDEN: Status — uncomment to show again
+  // { to: "/status", label: "Status", icon: Circle },
   { to: "/channels", label: "Channels", icon: Radio },
-  { to: "/groups", label: "Groups", icon: Users },
-  { to: "/calls", label: "Calls", icon: Phone },
+  // HIDDEN: Groups — uncomment to show again
+  // { to: "/groups", label: "Groups", icon: Users },
+  // HIDDEN: Calls — uncomment to show again
+  // { to: "/calls", label: "Calls", icon: Phone },
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 

@@ -8,8 +8,9 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
 import {
   getChannel, listPosts, createPost, togglePostLike, markPostViewed, likeCount, viewCount,
-  subscribeToChannels, addComment, listComments, subscribeToComments, toggleChannelSubscribe, updateChannel,
+  subscribeToChannels, addComment, listComments, subscribeToComments,   toggleChannelSubscribe, updateChannel,
   addChannelAdmin, removeChannelAdmin, requestJoinChannel, approveJoinChannelRequest, rejectJoinChannelRequest, uploadChannelAvatar,
+  displaySubscriberCount,
 } from "@/api/channelsApi";
 import { listUsers } from "@/api/usersApi";
 import { useAuth } from "@/hooks/useAuth";
@@ -299,7 +300,7 @@ function ChannelPage() {
             <p className="truncate font-semibold">{channel?.name}</p>
             {canPost && <ShieldCheck className="h-4 w-4 text-primary shrink-0" />}
           </div>
-          <p className="truncate text-xs text-muted-foreground">{channel?.memberIds.length} subscribers</p>
+          <p className="truncate text-xs text-muted-foreground">{displaySubscriberCount(channel)} subscribers</p>
         </div>
         {(isOwner || isAdmin) && (
           <Button
@@ -471,7 +472,7 @@ function ChannelPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Members</p>
-                      <p className="text-lg font-semibold">{channel.memberIds.length}</p>
+                        <p className="text-lg font-semibold">{displaySubscriberCount(channel)}</p>
                     </div>
                     <div>
                       <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">Created</p>

@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
-import { getChannel, listPosts } from "@/api/channelsApi";
+import { getChannel, listPosts, displaySubscriberCount } from "@/api/channelsApi";
 import { getChat } from "@/api/chatsApi";
 import { listMessages } from "@/api/messagesApi";
 import { useAuth } from "@/hooks/useAuth";
@@ -135,7 +135,7 @@ function JoinPreviewPage() {
                   <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
                     <Users className="h-3.5 w-3.5" /> Members
                   </div>
-                  <p className="mt-2 text-2xl font-semibold">{item.memberIds?.length || 0}</p>
+                   <p className="mt-2 text-2xl font-semibold">{kind === "channel" ? displaySubscriberCount(item) : (item.memberIds?.length || 0)}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-background/70 p-4">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">

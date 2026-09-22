@@ -12,6 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { ensureSupabase } from '@/lib/supabaseClient';
+import { publish } from '@/lib/eventBus';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -104,6 +105,14 @@ export function BoostControlPanel() {
   const isRlsPolicyError = (error: any) => {
     const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.code ?? ''}`.toLowerCase();
     return message.includes('row-level security') || message.includes('violates row-level security') || message.includes('violates rls') || message.includes('policy') || error?.code === '42501';
+  };
+
+  // channel_settings.chat_id wrongly FKs to chats(id) in older schemas, so a
+  // legitimate CHANNEL id is rejected. Detect it to show an actionable fix
+  // instead of a cryptic DB error.
+  const isFkViolationError = (error: any) => {
+    const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.code ?? ''}`.toLowerCase();
+    return message.includes('foreign key') || message.includes('23503');
   };
 
   const isRecoverableBoostError = (error: any) => isMissingTableError(error) || isRlsPolicyError(error);
@@ -249,6 +258,9 @@ export function BoostControlPanel() {
       });
       if (!res.error) {
         serverOk = true;
+        // Refresh every subscriber-count surface so instant boosts show
+        // immediately (and gradual ones start ramping on next loads).
+        publish('channels:changed');
       } else if (isRecoverableBoostError(res.error)) {
         // Tables may be missing or RLS may block inserts in many deployments.
         // Keep the setting locally so the panel still reflects it, but say so
@@ -272,8 +284,14 @@ export function BoostControlPanel() {
           });
           toast.warning(`Server save failed — boost kept on this device only and will reset on refresh.`);
         } catch {}
-      } else {
-        error = res.error;
+      } else if (res.error) {
+        if (isFkViolationError(res.error)) {
+          error = new Error(
+            `Database rejected the channel id (foreign-key mismatch on channel_settings). Fix: run owner-full-power.sql (section 5) in your Supabase SQL editor so channel boosts are accepted, then try again.`
+          );
+        } else {
+          error = res.error;
+        }
       }
     } else {
       if (!selectedMessage) {

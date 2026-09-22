@@ -114,6 +114,12 @@ export type Channel = {
   appearanceColor?: string;
   allowedReactionEmojis?: string[];
   joinRequests?: JoinRequest[];
+  /**
+   * Admin subscriber-boost add-on, computed at fetch time from the
+   * `channel_settings` boost row (see channelsApi.displaySubscriberCount).
+   * Organic truth stays in `memberIds`; this is display-only.
+   */
+  boostedSubscribers?: number;
 };
 export type ChannelPost = {
   id: string;

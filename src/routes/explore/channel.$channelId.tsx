@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmptyState } from "@/components/EmptyState";
-import { getChannel } from "@/api/channelsApi";
+import { getChannel, displaySubscriberCount } from "@/api/channelsApi";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/explore/channel/$channelId")({
@@ -58,7 +58,7 @@ function ChannelPreview() {
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="rounded-2xl border bg-muted p-4">
             <p className="text-xs uppercase text-muted-foreground">Subscribers</p>
-            <p className="mt-2 text-lg font-semibold">{channel.memberIds.length}</p>
+            <p className="mt-2 text-lg font-semibold">{displaySubscriberCount(channel)}</p>
           </div>
           <div className="rounded-2xl border bg-muted p-4">
             <p className="text-xs uppercase text-muted-foreground">Owner ID</p>
